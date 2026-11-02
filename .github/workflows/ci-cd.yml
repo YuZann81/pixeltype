@@ -45,23 +45,38 @@ jobs:
   deploy:
     name: Deploy to Production VPS
     needs: ci
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && secrets.SUMAPOD_SSH_KEY != ''
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check deployment secrets
+        id: secrets_check
+        env:
+          SSH_KEY: ${{ secrets.SUMAPOD_SSH_KEY }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SUMAPOD_SSH_KEY is not configured yet. Skipping production deployment."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download build artifact
+        if: steps.secrets_check.outputs.configured == 'true'
         uses: actions/download-artifact@v4
         with:
           name: pixeltype-dist
           path: dist
 
       - name: Verify build artifact integrity
+        if: steps.secrets_check.outputs.configured == 'true'
         run: |
           test -f dist/index.html || { echo "Missing dist/index.html"; exit 1; }
           test -d dist/assets || { echo "Missing dist/assets"; exit 1; }
           echo "Build artifact verified."
 
       - name: Setup SSH
+        if: steps.secrets_check.outputs.configured == 'true'
         env:
           SSH_KEY: ${{ secrets.SUMAPOD_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SUMAPOD_SSH_KNOWN_HOSTS }}
@@ -74,6 +89,7 @@ jobs:
           chmod 644 ~/.ssh/known_hosts
 
       - name: Package and transfer release
+        if: steps.secrets_check.outputs.configured == 'true'
         env:
           SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
           SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
@@ -95,6 +111,7 @@ jobs:
           "
 
       - name: Publish release (atomic swap)
+        if: steps.secrets_check.outputs.configured == 'true'
         env:
           SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
           SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
@@ -126,6 +143,7 @@ jobs:
           "
 
       - name: Verify live deployment via HTTPS
+        if: steps.secrets_check.outputs.configured == 'true'
         run: |
           echo "Verifying live endpoints..."
           curl -fsSI "https://pixeltype.razzan.site/"
@@ -142,4 +160,3 @@ jobs:
           echo "BFF unauthenticated check passed (HTTP 401)."
 
           echo "Deployment verified successfully."
-
