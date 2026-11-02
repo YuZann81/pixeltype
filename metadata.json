@@ -1,0 +1,6 @@
+{
+  "name": "PixelType",
+  "description": "The futuristic retro-pixel typing game with multi-language support, combo tracking, leaderboards, and interactive rounds.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,145 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check & lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixeltype-dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to Production VPS
+    needs: ci
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && secrets.SUMAPOD_SSH_KEY != ''
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pixeltype-dist
+          path: dist
+
+      - name: Verify build artifact integrity
+        run: |
+          test -f dist/index.html || { echo "Missing dist/index.html"; exit 1; }
+          test -d dist/assets || { echo "Missing dist/assets"; exit 1; }
+          echo "Build artifact verified."
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SUMAPOD_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SUMAPOD_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Package and transfer release
+        env:
+          SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
+          SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
+        run: |
+          RELEASE_ID="${GITHUB_SHA::8}-${GITHUB_RUN_ID}"
+          echo "Deploying release: ${RELEASE_ID}"
+
+          tar -czf dist.tar.gz -C dist .
+
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "mkdir -p /var/www/pixeltype/releases/${RELEASE_ID}"
+          scp -i ~/.ssh/deploy_key dist.tar.gz "${SSH_USER}@${SSH_HOST}:/var/www/pixeltype/releases/${RELEASE_ID}/dist.tar.gz"
+
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "
+            set -euo pipefail
+            cd /var/www/pixeltype/releases/${RELEASE_ID}
+            tar -xzf dist.tar.gz
+            rm dist.tar.gz
+            [ -f index.html ] && [ -d assets ]
+          "
+
+      - name: Publish release (atomic swap)
+        env:
+          SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
+          SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
+        run: |
+          RELEASE_ID="${GITHUB_SHA::8}-${GITHUB_RUN_ID}"
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "
+            set -euo pipefail
+
+            # 1. First-time transition: migrate existing dist directory to releases structure
+            if [ -d /var/www/pixeltype/dist ] && [ ! -L /var/www/pixeltype/dist ]; then
+              mkdir -p /var/www/pixeltype/releases/legacy
+              mv /var/www/pixeltype/dist /var/www/pixeltype/releases/legacy/dist
+              ln -sfn /var/www/pixeltype/releases/legacy/dist /var/www/pixeltype/dist
+            fi
+
+            # 2. Record current active release for rollback
+            if [ -L /var/www/pixeltype/dist ]; then
+              CURRENT_TARGET=\$(readlink -f /var/www/pixeltype/dist)
+              ln -sfn \"\$CURRENT_TARGET\" /var/www/pixeltype/previous
+            fi
+
+            # 3. Atomically switch dist symlink to new release
+            ln -sfn /var/www/pixeltype/releases/${RELEASE_ID} /var/www/pixeltype/dist_tmp
+            mv -Tf /var/www/pixeltype/dist_tmp /var/www/pixeltype/dist
+
+            # 4. Prune older releases, keeping the 5 most recent
+            cd /var/www/pixeltype/releases
+            ls -dt */ | tail -n +6 | xargs -r rm -rf
+          "
+
+      - name: Verify live deployment via HTTPS
+        run: |
+          echo "Verifying live endpoints..."
+          curl -fsSI "https://pixeltype.razzan.site/"
+          curl -fsSI "https://pixeltype.razzan.site/gameplay"
+          curl -fsSI "https://pixeltype.razzan.site/leaderboard"
+          curl -fsSI "https://pixeltype.razzan.site/api/p2r/health"
+
+          # Verify unauthenticated BFF game-token route rejects with HTTP 401
+          BFF_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://pixeltype.razzan.site/api/bff/game-token")
+          if [ "$BFF_STATUS" != "401" ]; then
+            echo "BFF check failed: expected HTTP 401, got $BFF_STATUS"
+            exit 1
+          fi
+          echo "BFF unauthenticated check passed (HTTP 401)."
+
+          echo "Deployment verified successfully."
+

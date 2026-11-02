@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --font-pixel: "Press Start 2P", monospace;
+  --font-sans: "Inter", sans-serif;
+  --color-card-border: #3A2B5C;
+  --color-accent-purple: #7C6BF5;
+  --color-accent-pink: #EC4899;
+}
+
+.font-pixel {
+  font-family: 'Press Start 2P', monospace;
+}
+
+.font-body {
+  font-family: 'Inter', sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0B0B1F;
+}
+::-webkit-scrollbar-thumb {
+  background: #3A2B5C;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #7C6BF5;
+}
