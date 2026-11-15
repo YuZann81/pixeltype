@@ -10,6 +10,7 @@ import SpaceBackground from "../components/SpaceBackground.jsx";
 import Button from "../components/Button.jsx";
 import Card from "../components/Card.jsx";
 import { useGame } from "../context/GameContext.jsx";
+import { formatPixelTypeTelemetry, validatePixelTypeTelemetry } from "../lib/api/scoringAdapter.ts";
 
 export default function Overview() {
   const navigate = useNavigate();
@@ -35,17 +36,13 @@ export default function Overview() {
 
     try {
       const finalScore = state.bestScore || state.score || 0;
-      const telemetryData = {
-        rounds: state.roundData || [],
+      const telemetryData = formatPixelTypeTelemetry(state.roundData || [], {
         language: state.language || "IND",
-        score: finalScore,
-        best_score: finalScore,
-        overall_score: finalScore,
-        accuracy: state.acc || 0,
-        net_wpm: state.wpm || 0,
-        total_characters: state.charCount || 0,
-        completion_time_ms: state.roundData?.reduce((sum, r) => sum + (r.duration * 1000), 0) || 0,
-      };
+        finalScore,
+      });
+
+      // Assert telemetry conforms strictly to PixelTypeScoringAdapter
+      validatePixelTypeTelemetry(telemetryData);
 
       const result = await completeP2RSession(finalScore, telemetryData);
       setP2rResult(result);

@@ -360,30 +360,31 @@ export function GameProvider({ children }) {
     }
   }, []);
 
-  // Game token management
-  const getValidGameToken = useCallback(async () => {
-    if (state.gameToken && state.gameTokenExpiry && Date.now() < state.gameTokenExpiry - 30000) {
+  // Game token management with proactive caching & refresh
+  const getValidGameToken = useCallback(async (options = {}) => {
+    // If we have a cached game token with at least 30s validity left, use it
+    if (!options.forceRefresh && state.gameToken && state.gameTokenExpiry && Date.now() < state.gameTokenExpiry - 30000) {
       return state.gameToken;
-    }
-
-    if (!state.authToken) {
-      throw new Error("No player token available");
     }
 
     try {
       const response = await getGameAccessTokenViaProxy("pixeltype", {
-        token: state.authToken,
+        token: state.authToken || undefined,
       });
 
       if (response.success && response.data) {
         const { access_token, expires_in, expires_at } = response.data;
-        const expiryMs = new Date(expires_at).getTime();
+        const expiryMs = expires_at
+          ? new Date(expires_at).getTime()
+          : Date.now() + (expires_in || 900) * 1000;
+
         dispatch({ type: "SET_GAME_TOKEN", payload: { token: access_token, expiresAt: expiryMs } });
         return access_token;
       } else {
-        throw new Error(response.message || "Failed to get game token");
+        throw new Error(response.message || "Gagal memperoleh game access token");
       }
     } catch (err) {
+      dispatch({ type: "CLEAR_GAME_TOKEN" });
       console.error("[P2R] Game token fetch failed:", err);
       throw err;
     }
@@ -413,7 +414,7 @@ export function GameProvider({ children }) {
 
     try {
       const event = await fetchActiveEvent();
-      const gameToken = await getValidGameToken();
+      let gameToken = await getValidGameToken();
 
       const idempotencyKey = `session_start_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
@@ -428,11 +429,26 @@ export function GameProvider({ children }) {
         sessionPayload.event_id = event.id;
       }
 
-      const response = await startSession(
-        "pixeltype",
-        sessionPayload,
-        { token: state.authToken, gameToken }
-      );
+      let response;
+      try {
+        response = await startSession(
+          "pixeltype",
+          sessionPayload,
+          { token: state.authToken, gameToken }
+        );
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          // Game token may have expired, force refresh and retry once
+          gameToken = await getValidGameToken({ forceRefresh: true });
+          response = await startSession(
+            "pixeltype",
+            sessionPayload,
+            { token: state.authToken, gameToken }
+          );
+        } else {
+          throw err;
+        }
+      }
 
       if (response.success && response.data) {
         const { session, session_token, is_replayed } = response.data;
@@ -464,24 +480,42 @@ export function GameProvider({ children }) {
     }
 
     try {
-      const gameToken = await getValidGameToken();
+      let gameToken = await getValidGameToken();
       const sessionToken = state.session.sessionToken;
 
       if (!sessionToken) {
         throw new Error("Session token not available (already consumed)");
       }
 
-      const response = await completeSession(
-        "pixeltype",
-        state.session.id,
-        {
-          session_token: sessionToken,
-          best_score: finalScore,
-          data: telemetryData,
-          metadata: { completed_at: new Date().toISOString() },
-        },
-        { token: state.authToken, gameToken }
-      );
+      const completePayload = {
+        session_token: sessionToken,
+        best_score: finalScore,
+        data: telemetryData,
+        metadata: { completed_at: new Date().toISOString() },
+      };
+
+      let response;
+      try {
+        response = await completeSession(
+          "pixeltype",
+          state.session.id,
+          completePayload,
+          { token: state.authToken, gameToken }
+        );
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          // Retry once with refreshed game token
+          gameToken = await getValidGameToken({ forceRefresh: true });
+          response = await completeSession(
+            "pixeltype",
+            state.session.id,
+            completePayload,
+            { token: state.authToken, gameToken }
+          );
+        } else {
+          throw err;
+        }
+      }
 
       if (response.success && response.data) {
         dispatch({ type: "SESSION_COMPLETED" });
