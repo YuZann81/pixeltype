@@ -223,21 +223,17 @@ export interface StartSessionRequest {
 }
 
 export interface StartSessionResponse {
-  success: boolean;
-  message: string;
-  data: {
-    session: {
-      id: string;
-      status: string;
-      game: string;
-      event_id: string | null;
-      platform: string;
-      started_at: string;
-      expires_at: string;
-    };
-    session_token: string;
-    is_replayed: boolean;
+  session: {
+    id: string;
+    status: string;
+    game: string;
+    event_id: string | null;
+    platform: string;
+    started_at: string;
+    expires_at: string;
   };
+  session_token: string;
+  is_replayed: boolean;
 }
 
 export interface StartSessionOptions extends ApiRequestOptions {
@@ -278,16 +274,12 @@ export interface CompleteSessionResult {
 }
 
 export interface CompleteSessionResponse {
-  success: boolean;
-  message: string;
-  data: {
-    session: {
-      id: string;
-      status: string;
-      completed_at: string | null;
-    };
-    result: CompleteSessionResult | null;
+  session: {
+    id: string;
+    status: string;
+    completed_at: string | null;
   };
+  result: CompleteSessionResult | null;
 }
 
 export async function completeSession(

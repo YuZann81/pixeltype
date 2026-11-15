@@ -1,11 +1,79 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { fileURLToPath } from 'url';
+import { defineConfig, type Plugin } from 'vite';
+import dotenv from 'dotenv';
+import { getOrFetchGameToken } from './src/server/gameTokenService.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables for Vite server (.env.local takes precedence)
+dotenv.config({ path: path.resolve(__dirname, '.env.local') });
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+/**
+ * Development middleware to handle game token acquisition server-side
+ * without exposing P2R_CLIENT_SECRET to the client browser.
+ */
+function p2rGameTokenDevPlugin(): Plugin {
+  return {
+    name: 'p2r-game-token-dev',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const rawUrl = req.url || '';
+        const pathname = rawUrl.split('?')[0];
+
+        if (req.method === 'POST' && (pathname === '/api/bff/game-token' || pathname === '/api/game-token')) {
+          try {
+            const queryParams = new URL(rawUrl, 'http://localhost').searchParams;
+            const forceRefresh = queryParams.get('force') === 'true';
+            const tokenData = await getOrFetchGameToken({ forceRefresh });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.statusCode = 200;
+            res.end(
+              JSON.stringify({
+                success: true,
+                message: 'Game access token issued successfully.',
+                data: tokenData,
+              })
+            );
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Failed to acquire game access token';
+            res.setHeader('Content-Type', 'application/json');
+            res.statusCode = 500;
+            res.end(
+              JSON.stringify({
+                success: false,
+                message,
+              })
+            );
+          }
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
 
 export default defineConfig(() => {
+  const rawApiBase = process.env.P2R_DEV_PROXY_TARGET || process.env.P2R_API_BASE_URL || 'https://pameran.devsaka.id/api/v1';
+  let targetOrigin = 'https://pameran.devsaka.id';
+  let targetPathPrefix = '/api/v1';
+
+  try {
+    const parsed = new URL(rawApiBase);
+    targetOrigin = parsed.origin;
+    targetPathPrefix = parsed.pathname.replace(/\/+$/, '');
+  } catch {
+    // fallback defaults
+  }
+
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), p2rGameTokenDevPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -19,18 +87,8 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         /*
-         * Panel BFF. Same-origin in development, matching production: the
-         * browser calls /api/bff/* on this dev server and Vite forwards it to
-         * the Panel. Deliberately NOT under /api/p2r/, which belongs to the API.
-         *
-         * Target is the stack's single origin (nginx, :8080) rather than the
-         * Panel port directly. The Panel container is built with
-         * NEXT_PUBLIC_BASE_PATH=/panel, so its BFF route handler only answers
-         * at /panel/api/bff/game-token; nginx already maps origin /api/* to that
-         * upstream path. Forwarding to nginx therefore needs NO rewrite here -
-         * /api/bff/game-token is passed through verbatim and nginx applies
-         * `location /api/ -> proxy_pass http://p2r_panel/panel/api/`.
-         * Targeting :3001 directly would 404 on the missing /panel prefix.
+         * Panel BFF. Fallback proxy for non-token BFF endpoints if any.
+         * The /api/bff/game-token endpoint is intercepted above by p2rGameTokenDevPlugin.
          */
         '/api/bff': {
           target: 'http://127.0.0.1:8080',
@@ -38,15 +96,13 @@ export default defineConfig(() => {
           secure: false,
         },
         /*
-         * Laravel API. The dev proxy mirrors the P2R proxy convention:
-         * /api/p2r/<rest> -> /p2r/v1/<rest>, so VITE_P2R_API_BASE_URL must be
-         * '/api/p2r' here. Including '/v1' would yield /p2r/v1/v1/... and 404.
+         * P2R Core API proxy. Maps /api/p2r/<rest> to ${targetOrigin}${targetPathPrefix}/<rest>.
          */
         '/api/p2r': {
-          target: 'http://127.0.0.1:8090',
+          target: targetOrigin,
           changeOrigin: true,
           secure: false,
-          rewrite: (path) => path.replace(/^\/api\/p2r/, '/p2r/v1'),
+          rewrite: (pathStr) => pathStr.replace(/^\/api\/p2r/, targetPathPrefix),
         },
       },
     },

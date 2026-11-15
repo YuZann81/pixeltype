@@ -106,7 +106,12 @@ function buildApiUrl(path: string, searchParams?: ApiRequestOptions["searchParam
    * Callers pass version-less paths (e.g. `/games/pixeltype/contract`), so no
    * prefix stripping is performed or needed.
    */
-  const rawBase = import.meta.env.VITE_P2R_API_BASE_URL?.trim() || "/api/p2r";
+  const envBase = (typeof import.meta !== "undefined" && import.meta.env?.VITE_P2R_API_BASE_URL)
+    ? import.meta.env.VITE_P2R_API_BASE_URL
+    : (typeof process !== "undefined" && process.env?.VITE_P2R_API_BASE_URL)
+      ? process.env.VITE_P2R_API_BASE_URL
+      : "/api/p2r";
+  const rawBase = envBase?.trim() || "/api/p2r";
   const cleanBase = rawBase.replace(/\/+$/, "");
 
   const cleanPath = path.replace(/^\/+/, "");
