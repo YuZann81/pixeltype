@@ -6,13 +6,13 @@
 import React from "react";
 
 /**
- * Card component with standard PixelType styling
+ * Card component — Clean Arcade Pixel Galaxy (restrained indigo, no neon glow)
  */
 export default function Card({ children, className = "", id, ...props }) {
   return (
     <div
       id={id}
-      className={`bg-[rgba(26,27,46,0.6)] backdrop-blur-sm border border-[#3A2B5C] rounded-xl shadow-lg ${className}`}
+      className={`bg-[#121528]/85 border border-[#2A2F4F] rounded-xl ${className}`}
       {...props}
     >
       {children}

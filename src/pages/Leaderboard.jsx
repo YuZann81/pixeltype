@@ -179,19 +179,19 @@ export default function Leaderboard() {
                     {firstPlace ? firstPlace.nick : "-"}
                   </span>
                   {firstPlace && (
-                    <span className="text-[11px] text-[#4ADE80] block font-mono">
+                    <span className="text-[11px] text-[#86CFA4] block font-mono-typing">
                       {firstPlace.wpm} WPM · {firstPlace.acc}%
                     </span>
                   )}
-                  <span className="text-xs text-[#EC4899] font-pixel block mt-0.5">
+                  <span className="text-[10px] text-[#C2B7FF] font-pixel font-normal block mt-0.5">
                     {firstPlace ? `${firstPlace.score} PTS` : "-"}
                   </span>
                 </div>
                 <div
                   className={`w-full h-32 sm:h-36 rounded-t-xl border-t-2 border-l border-r flex items-center justify-center ${
                     firstPlace
-                      ? "bg-[rgba(35,32,65,0.9)] border-[#7C6BF5] shadow-lg shadow-[#7C6BF5]/20"
-                      : "bg-[rgba(26,27,46,0.3)] border-[#3A2B5C]/30 opacity-40"
+                      ? "bg-[#171B34] border-[#7C6BF5]"
+                      : "bg-[#121528]/40 border-[#2A2F4F]/40 opacity-40"
                   }`}
                 >
                   <span className="font-pixel text-3xl text-[#7C6BF5]">1</span>

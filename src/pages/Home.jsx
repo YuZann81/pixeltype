@@ -39,88 +39,78 @@ export default function Home() {
   return (
     <div
       id="home-page"
-      className="relative min-h-screen flex flex-col justify-between p-6 sm:p-10 select-none overflow-hidden"
+      className="relative min-h-screen flex flex-col justify-between px-5 py-6 sm:px-8 sm:py-7 select-none overflow-x-hidden"
     >
-      <SpaceBackground variant="full" />
+      <SpaceBackground variant="gameplay" />
 
-      {/* Header Bar */}
-      <header className="flex items-start justify-between w-full max-w-6xl mx-auto z-10">
-        {/* Kiri atas: teks PIXEL TYPE (font pixel, kecil) */}
-        <div id="home-logo" className="pt-2">
-          <span className="font-pixel text-xs sm:text-sm tracking-widest text-[#E5E7EB]">
-            PIXEL TYPE
+      {/* Subtle atmospheric vignette */}
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 pointer-events-none -z-10 bg-[radial-gradient(ellipse_at_center,rgba(11,11,31,0.12)_0%,rgba(11,11,31,0.72)_100%)]"
+      />
+
+      {/* Minimal Header Bar */}
+      <header className="flex items-center justify-between w-full max-w-5xl mx-auto z-10">
+        <div id="home-logo">
+          <span className="font-pixel font-normal text-[10px] sm:text-xs tracking-widest text-[#E5E7F0]/90">
+            PixelType
           </span>
         </div>
 
-        {/* Kanan atas: to Leaderboard link */}
-        <div className="flex flex-col items-end gap-2 pt-2">
-          <Link
-            id="link-to-leaderboard"
-            to="/leaderboard"
-            className="text-xs text-[#9CA3AF] hover:text-[#7C6BF5] tracking-wide transition underline-offset-4 hover:underline"
-          >
-            to Leaderboard
-          </Link>
-        </div>
+        <Link
+          id="link-to-leaderboard"
+          to="/leaderboard"
+          className="font-pixel font-normal text-[8px] sm:text-[9px] text-[#8E93A8] hover:text-[#E5E7F0] tracking-wider transition-colors"
+        >
+          Leaderboard
+        </Link>
       </header>
 
-      {/* Tengah: Press any Button to Play (Inter italic, abu lembut) */}
+      {/* Main Interaction Box — Single Play Prompt Only */}
       <main className="flex-1 flex flex-col items-center justify-center my-8 z-10">
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="text-center mb-6"
-        >
-          <p
-            id="home-prompt-text"
-            className="font-body italic text-[#9CA3AF] text-lg sm:text-xl tracking-wide cursor-pointer"
-            onClick={() => navigate("/login")}
-          >
-            Press any Button to Play
-          </p>
-        </motion.div>
-
-        {/* Bawah: kotak besar kosong (area utama dengan border tipis & ilustrasi retro) */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
+          transition={{ duration: 0.4 }}
           id="home-main-box"
           onClick={() => navigate("/login")}
-          className="w-full max-w-3xl h-64 sm:h-80 rounded-2xl bg-[#1A1B2E]/40 border border-[#3A2B5C] backdrop-blur-sm flex flex-col items-center justify-center p-6 cursor-pointer hover:border-[#7C6BF5]/50 transition group relative overflow-hidden"
+          className="w-full max-w-2xl h-64 sm:h-76 rounded-2xl bg-[#121528]/70 border border-[#2A2F4F] hover:border-[#7C6BF5]/60 flex flex-col items-center justify-center p-6 cursor-pointer transition-colors group relative overflow-hidden"
         >
-          {/* Subtle Retro Astronaut / Pixel Grid Graphic in center */}
-          <div className="relative flex flex-col items-center justify-center opacity-70 group-hover:opacity-100 transition-opacity duration-300">
-            {/* Retro spaceship pixel silhouette SVG */}
+          <div className="relative flex flex-col items-center justify-center opacity-85 group-hover:opacity-100 transition-opacity duration-200">
             <svg
-              className="w-16 h-16 sm:w-20 sm:h-20 text-[#7C6BF5]/80 mb-4"
-              viewBox="0 0 24 24"
+              className="w-12 h-12 sm:w-14 sm:h-14 text-[#7C6BF5]/90 mb-5"
+              viewBox="0 0 12 12"
               fill="currentColor"
+              shapeRendering="crispEdges"
+              aria-hidden="true"
             >
-              <path d="M12 2L9 8H15L12 2Z" />
-              <path d="M7 10L11 9V14H6L7 10Z" />
-              <path d="M17 10L13 9V14H18L17 10Z" />
-              <path d="M10 15H14V19H10V15Z" />
-              <path d="M8 20H11V22H8V20Z" fill="#EC4899" />
-              <path d="M13 20H16V22H13V20Z" fill="#EC4899" />
+              <rect x="5" y="1" width="2" height="2" />
+              <rect x="4" y="3" width="4" height="4" />
+              <rect x="3" y="5" width="1" height="3" />
+              <rect x="8" y="5" width="1" height="3" />
+              <rect x="4" y="7" width="4" height="2" />
+              <rect x="4" y="9" width="1" height="2" fill="#8E93A8" />
+              <rect x="7" y="9" width="1" height="2" fill="#8E93A8" />
             </svg>
-            <span className="font-pixel text-[11px] sm:text-xs text-[#9CA3AF] tracking-wider text-center">
-              [ CLICK OR PRESS ANY KEY TO INITIALIZE ]
+            <span
+              id="home-play-prompt"
+              className="font-pixel font-normal text-[10px] sm:text-xs text-[#E5E7F0] tracking-widest text-center leading-relaxed"
+            >
+              PRESS ANY KEY TO PLAY
             </span>
           </div>
 
-          {/* Corner pixel markers */}
-          <div className="absolute top-2 left-2 w-2 h-2 border-t-2 border-l-2 border-[#7C6BF5]/60" />
-          <div className="absolute top-2 right-2 w-2 h-2 border-t-2 border-r-2 border-[#7C6BF5]/60" />
-          <div className="absolute bottom-2 left-2 w-2 h-2 border-b-2 border-l-2 border-[#7C6BF5]/60" />
-          <div className="absolute bottom-2 right-2 w-2 h-2 border-b-2 border-r-2 border-[#7C6BF5]/60" />
+          {/* Subtle corner markers */}
+          <div className="absolute top-3 left-3 w-2 h-2 border-t border-l border-[#343952]" />
+          <div className="absolute top-3 right-3 w-2 h-2 border-t border-r border-[#343952]" />
+          <div className="absolute bottom-3 left-3 w-2 h-2 border-b border-l border-[#343952]" />
+          <div className="absolute bottom-3 right-3 w-2 h-2 border-b border-r border-[#343952]" />
         </motion.div>
       </main>
 
-      {/* Footer subtle tag */}
-      <footer className="w-full max-w-6xl mx-auto text-center text-[11px] text-[#9CA3AF]/60 z-10">
-        PIXELTYPE SYSTEM v1.0 • 3 ROUNDS TYPING CHALLENGE
+      {/* Subtle Footer */}
+      <footer className="w-full max-w-5xl mx-auto text-center font-pixel font-normal text-[7px] sm:text-[8px] tracking-widest text-[#8E93A8]/50 z-10">
+        PixelType • 3 Rounds Typing Challenge
       </footer>
     </div>
   );

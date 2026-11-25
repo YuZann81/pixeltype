@@ -14,36 +14,36 @@ export default function ComboCounter({ combo = 0 }) {
   const isHigh = combo >= 20;
   const isMedium = combo >= 10;
 
-  let colorClass = "text-[#9CA3AF]";
+  let colorClass = "text-[#8E93A8]";
   let milestoneLabel = null;
   if (isSuper) {
-    colorClass = "text-[#FBBF24]";
+    colorClass = "text-[#E8C168]";
     milestoneLabel = "COSMIC";
   } else if (isHigh) {
-    colorClass = "text-[#EC4899]";
+    colorClass = "text-[#C2B7FF]";
     milestoneLabel = "HYPER";
   } else if (isMedium) {
     colorClass = "text-[#7C6BF5]";
     milestoneLabel = "STREAK";
   } else if (combo > 0) {
-    colorClass = "text-[#4ADE80]";
+    colorClass = "text-[#86CFA4]";
   }
 
   return (
     <div
       id="combo-counter"
-      className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-lg bg-[#160D30]/80 border border-[#3A2B5C] select-none transition-colors duration-150"
+      className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-lg bg-[#121528]/80 border border-[#2A2F4F] select-none transition-colors duration-150"
     >
-      <span className="font-pixel text-[10px] tracking-wider text-[#9CA3AF]">
+      <span className="font-pixel font-normal text-[8px] tracking-wider text-[#8E93A8]">
         COMBO
       </span>
       <span
-        className={`font-mono-typing text-base sm:text-lg font-bold transition-colors duration-150 tabular-nums ${colorClass}`}
+        className={`font-mono-typing text-sm sm:text-base font-medium transition-colors duration-150 tabular-nums ${colorClass}`}
       >
         {combo}x
       </span>
       {milestoneLabel && (
-        <span className={`font-pixel text-[9px] tracking-widest ${colorClass}`}>
+        <span className={`font-pixel font-normal text-[8px] tracking-widest ${colorClass}`}>
           {milestoneLabel}
         </span>
       )}

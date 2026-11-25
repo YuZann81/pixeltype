@@ -80,12 +80,12 @@ export default function Overview() {
   const p2rFormulaVersion = p2rResult?.formula_version || "v1.0";
 
   const statItems = [
-    { label: "NICK", value: nick, isPixel: false, color: "text-[#E5E7EB]" },
+    { label: "NICK", value: nick, isPixel: false, color: "text-[#E5E7F0]" },
     { label: "WPM", value: wpm, isPixel: true, color: "text-[#7C6BF5]" },
-    { label: "ACC", value: `${acc}%`, isPixel: true, color: "text-[#4ADE80]" },
-    { label: "CHAR", value: charCount, isPixel: true, color: "text-[#E5E7EB]" },
-    { label: "MAX COMBO", value: `${state.maxCombo || 0}x`, isPixel: true, color: "text-[#FBBF24]" },
-    { label: "SCORE", value: p2rDisplayScore, isPixel: true, color: "text-[#EC4899]" },
+    { label: "ACC", value: `${acc}%`, isPixel: true, color: "text-[#86CFA4]" },
+    { label: "CHAR", value: charCount, isPixel: true, color: "text-[#E5E7F0]" },
+    { label: "MAX COMBO", value: `${state.maxCombo || 0}x`, isPixel: true, color: "text-[#E8C168]" },
+    { label: "SCORE", value: p2rDisplayScore, isPixel: true, color: "text-[#C2B7FF]" },
   ];
 
   const roundBreakdowns = (state.roundData || []).slice(0, 3).map((r, idx) => {
@@ -225,8 +225,8 @@ export default function Overview() {
 
             {/* P2R Score Details */}
             {p2rResult && (
-              <div className="mb-4 p-3 rounded-lg bg-[#EC4899]/10 border border-[#EC4899]/30 text-xs text-[#EC4899]">
-                <div className="font-pixel text-[#EC4899] mb-1">P2R RESULT</div>
+              <div className="mb-4 p-3 rounded-lg bg-[#0D1020] border border-[#2A2F4F] text-xs text-[#A6A9BA] font-mono-typing space-y-0.5">
+                <div className="font-pixel font-normal text-[9px] text-[#7C6BF5] mb-1">P2R RESULT</div>
                 <div>Display Score: {p2rDisplayScore.toFixed(2)}</div>
                 <div>Raw Score: {p2rResult.score} / {p2rScoreScale}</div>
                 <div>Formula: {p2rFormulaVersion}</div>
