@@ -22,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
 
       - name: Install dependencies
@@ -34,19 +34,36 @@ jobs:
       - name: Type check & lint
         run: npm run lint
 
-      - name: Production build
+      - name: Build frontend and Express server runtime
         run: npm run build
 
-      - name: Upload build artifact
+      - name: Verify runtime build outputs and secret isolation
+        run: |
+          test -f dist/index.html || { echo "Missing dist/index.html"; exit 1; }
+          test -d dist/assets || { echo "Missing dist/assets"; exit 1; }
+          test -f dist-server/index.mjs || { echo "Missing dist-server/index.mjs"; exit 1; }
+          if grep -rnE 'P2R_CLIENT_SECRET|P2R_CLIENT_ID' dist/; then
+            echo "::error::Server credential identifiers leaked into client dist/ bundle."
+            exit 1
+          fi
+          echo "Frontend bundle and Express server runtime verified."
+
+      - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pixeltype-dist
-          path: dist/
+          name: pixeltype-runtime
+          path: |
+            dist/
+            dist-server/
+            package.json
+            package-lock.json
+            Dockerfile
+            .dockerignore
           retention-days: 7
           if-no-files-found: error
 
   deploy:
-    name: Deploy to Production VPS
+    name: Deploy Express Runtime to Production VPS
     needs: ci
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
@@ -56,27 +73,32 @@ jobs:
         id: secrets_check
         env:
           SSH_KEY: ${{ secrets.SUMAPOD_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
+          SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
         run: |
-          if [ -z "$SSH_KEY" ]; then
+          if [ -z "$SSH_KEY" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::SUMAPOD_SSH_KEY is not configured yet. Skipping production deployment."
+            echo "::notice::Deployment SSH secrets are not fully configured. Skipping production deployment."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download build artifact
+      - name: Download runtime artifact
         if: steps.secrets_check.outputs.configured == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: pixeltype-dist
-          path: dist
+          name: pixeltype-runtime
+          path: runtime-release
 
-      - name: Verify build artifact integrity
+      - name: Verify runtime artifact integrity
         if: steps.secrets_check.outputs.configured == 'true'
         run: |
-          test -f dist/index.html || { echo "Missing dist/index.html"; exit 1; }
-          test -d dist/assets || { echo "Missing dist/assets"; exit 1; }
-          echo "Build artifact verified."
+          test -f runtime-release/dist/index.html || { echo "Missing dist/index.html"; exit 1; }
+          test -d runtime-release/dist/assets || { echo "Missing dist/assets"; exit 1; }
+          test -f runtime-release/dist-server/index.mjs || { echo "Missing dist-server/index.mjs"; exit 1; }
+          test -f runtime-release/package.json || { echo "Missing package.json"; exit 1; }
+          test -f runtime-release/package-lock.json || { echo "Missing package-lock.json"; exit 1; }
+          echo "Runtime artifact verified."
 
       - name: Setup SSH
         if: steps.secrets_check.outputs.configured == 'true'
@@ -91,75 +113,87 @@ jobs:
           echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Package and transfer release
+      - name: Package and transfer Express runtime release
         if: steps.secrets_check.outputs.configured == 'true'
         env:
           SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
           SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
         run: |
           RELEASE_ID="${GITHUB_SHA::8}-${GITHUB_RUN_ID}"
-          echo "Deploying release: ${RELEASE_ID}"
+          echo "Deploying Express runtime release: ${RELEASE_ID}"
 
-          tar -czf dist.tar.gz -C dist .
+          tar -czf pixeltype-runtime.tar.gz -C runtime-release .
 
           ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "mkdir -p /var/www/pixeltype/releases/${RELEASE_ID}"
-          scp -i ~/.ssh/deploy_key dist.tar.gz "${SSH_USER}@${SSH_HOST}:/var/www/pixeltype/releases/${RELEASE_ID}/dist.tar.gz"
+          scp -i ~/.ssh/deploy_key pixeltype-runtime.tar.gz "${SSH_USER}@${SSH_HOST}:/var/www/pixeltype/releases/${RELEASE_ID}/pixeltype-runtime.tar.gz"
 
           ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "
             set -euo pipefail
             cd /var/www/pixeltype/releases/${RELEASE_ID}
-            tar -xzf dist.tar.gz
-            rm dist.tar.gz
-            [ -f index.html ] && [ -d assets ]
+            tar -xzf pixeltype-runtime.tar.gz
+            rm pixeltype-runtime.tar.gz
+            [ -f dist/index.html ] && [ -d dist/assets ] && [ -f dist-server/index.mjs ]
+            npm ci --omit=dev
           "
 
-      - name: Publish release (atomic swap)
+      - name: Publish runtime release (atomic swap)
         if: steps.secrets_check.outputs.configured == 'true'
         env:
           SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
           SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
+          RESTART_CMD: ${{ vars.PIXELTYPE_RESTART_CMD }}
         run: |
           RELEASE_ID="${GITHUB_SHA::8}-${GITHUB_RUN_ID}"
           ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "
             set -euo pipefail
 
-            # 1. First-time transition: migrate existing dist directory to releases structure
-            if [ -d /var/www/pixeltype/dist ] && [ ! -L /var/www/pixeltype/dist ]; then
-              mkdir -p /var/www/pixeltype/releases/legacy
-              mv /var/www/pixeltype/dist /var/www/pixeltype/releases/legacy/dist
-              ln -sfn /var/www/pixeltype/releases/legacy/dist /var/www/pixeltype/dist
-            fi
-
-            # 2. Record current active release for rollback
-            if [ -L /var/www/pixeltype/dist ]; then
-              CURRENT_TARGET=\$(readlink -f /var/www/pixeltype/dist)
+            # Record current active release for rollback
+            if [ -L /var/www/pixeltype/current ]; then
+              CURRENT_TARGET=\$(readlink -f /var/www/pixeltype/current)
               ln -sfn \"\$CURRENT_TARGET\" /var/www/pixeltype/previous
             fi
 
-            # 3. Atomically switch dist symlink to new release
-            ln -sfn /var/www/pixeltype/releases/${RELEASE_ID} /var/www/pixeltype/dist_tmp
+            # Atomically switch current runtime symlink to new release
+            ln -sfn /var/www/pixeltype/releases/${RELEASE_ID} /var/www/pixeltype/current_tmp
+            mv -Tf /var/www/pixeltype/current_tmp /var/www/pixeltype/current
+
+            # Keep legacy dist symlink pointed at current/dist for host compatibility
+            ln -sfn /var/www/pixeltype/current/dist /var/www/pixeltype/dist_tmp
             mv -Tf /var/www/pixeltype/dist_tmp /var/www/pixeltype/dist
 
-            # 4. Prune older releases, keeping the 5 most recent
+            # Prune older releases, keeping the 5 most recent
             cd /var/www/pixeltype/releases
             ls -dt */ | tail -n +6 | xargs -r rm -rf
           "
 
-      - name: Verify live deployment via HTTPS
+          if [ -n "$RESTART_CMD" ]; then
+            ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "$RESTART_CMD"
+          else
+            echo "::notice::PIXELTYPE_RESTART_CMD repository variable is unset; activate/restart the Express runtime service (or rebuild Docker container) on host."
+          fi
+
+      - name: Verify live deployment via HTTPS (when public URL is configured)
         if: steps.secrets_check.outputs.configured == 'true'
+        env:
+          PUBLIC_URL: ${{ vars.PIXELTYPE_PUBLIC_URL }}
         run: |
-          echo "Verifying live endpoints..."
-          curl -fsSI "https://pixeltype.razzan.site/"
-          curl -fsSI "https://pixeltype.razzan.site/gameplay"
-          curl -fsSI "https://pixeltype.razzan.site/leaderboard"
-          curl -fsSI "https://pixeltype.razzan.site/api/p2r/health"
+          if [ -z "$PUBLIC_URL" ]; then
+            echo "::notice::PIXELTYPE_PUBLIC_URL is not configured yet. Skipping public HTTPS smoke checks until the production domain is confirmed."
+            exit 0
+          fi
+
+          BASE_URL="${PUBLIC_URL%/}"
+          echo "Verifying live endpoints at ${BASE_URL}..."
+          curl -fsSI "${BASE_URL}/"
+          curl -fsSI "${BASE_URL}/gameplay"
+          curl -fsSI "${BASE_URL}/leaderboard"
+          curl -fsS "${BASE_URL}/api/health"
 
           # Verify unauthenticated BFF game-token route rejects with HTTP 401
-          BFF_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://pixeltype.razzan.site/api/bff/game-token")
+          BFF_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${BASE_URL}/api/bff/game-token")
           if [ "$BFF_STATUS" != "401" ]; then
             echo "BFF check failed: expected HTTP 401, got $BFF_STATUS"
             exit 1
           fi
           echo "BFF unauthenticated check passed (HTTP 401)."
-
           echo "Deployment verified successfully."
