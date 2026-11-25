@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import SpaceBackground from "../components/SpaceBackground.jsx";
@@ -20,37 +20,58 @@ export default function Overview() {
   const [submitError, setSubmitError] = useState(null);
   const [p2rResult, setP2rResult] = useState(null);
 
-  // Submit score to P2R on mount
-  useEffect(() => {
-    if (state.isFinished && !p2rResult && !submitting && !submitError && state.session) {
-      submitToP2R();
+  // Guard refs prevent duplicate session completion on StrictMode double-mount or rapid retry clicks
+  const isSubmittingRef = useRef(false);
+  const autoSubmittedSessionRef = useRef(null);
+
+  const submitToP2R = useCallback(async () => {
+    if (
+      !state.session ||
+      state.session.status === "completed" ||
+      p2rResult ||
+      isSubmittingRef.current
+    ) {
+      return;
     }
-  }, [state.isFinished, state.session]);
 
-  const submitToP2R = async () => {
-    if (!state.session || submitting) return;
-
+    isSubmittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
 
     try {
-      const finalScore = state.score || 0;
+      // Derive bounded session score (0..300 <= 600) authoritatively from the 3 recorded rounds
       const telemetryData = formatPixelTypeTelemetry(state.roundData || [], {
         language: state.language || "IND",
-        finalScore,
       });
 
-      // Assert telemetry conforms strictly to PixelTypeScoringAdapter
+      // Assert telemetry & score conform strictly to PixelTypeScoringAdapter and P2R 0..600 limit
       validatePixelTypeTelemetry(telemetryData);
 
-      const result = await completeP2RSession(finalScore, telemetryData);
-      setP2rResult(result);
+      const result = await completeP2RSession(telemetryData.score, telemetryData);
+      if (result) {
+        setP2rResult(result);
+      }
     } catch (err) {
-      setSubmitError(err.message || "Gagal mengirim skor ke P2R");
+      setSubmitError(err?.message || "Gagal mengirim skor ke P2R");
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
-  };
+  }, [state.session, state.roundData, state.language, p2rResult, completeP2RSession]);
+
+  // Submit score to P2R once per active session when game finishes
+  useEffect(() => {
+    if (
+      state.isFinished &&
+      state.session?.id &&
+      state.session.status !== "completed" &&
+      !p2rResult &&
+      autoSubmittedSessionRef.current !== state.session.id
+    ) {
+      autoSubmittedSessionRef.current = state.session.id;
+      void submitToP2R();
+    }
+  }, [state.isFinished, state.session, p2rResult, submitToP2R]);
 
   const handleRetry = () => {
     // Navigate to language selection where a single authoritative session start & coin debit occurs
@@ -140,34 +161,46 @@ export default function Overview() {
               </p>
             </div>
 
-            {/* P2R Result Status */}
-            {(submitting || p2rResult || submitError) && (
-              <div className="mb-4 p-3 rounded-lg bg-[#7C6BF5]/10 border border-[#7C6BF5]/30 text-center space-y-2">
-                {submitting ? (
-                  <div className="flex items-center justify-center gap-2 text-[#7C6BF5]">
-                    <div className="w-4 h-4 border-2 border-[#7C6BF5] border-t-transparent rounded-full animate-spin" />
-                    <span className="font-pixel text-xs text-[#7C6BF5]">Mengirim skor ke P2R...</span>
-                  </div>
-                ) : p2rResult ? (
-                  <div className="text-[#4ADE80] font-pixel text-xs">
-                    ✓ Skor dikirim ke P2R (Display: {p2rDisplayScore.toFixed(2)})
-                  </div>
-                ) : submitError && (
-                  <div className="space-y-2">
-                    <div className="text-[#F87171] font-pixel text-xs">
-                      ✗ {submitError}
-                    </div>
-                    {state.session?.sessionToken && (
-                      <button
-                        id="btn-retry-submit-p2r"
-                        type="button"
-                        onClick={submitToP2R}
-                        className="text-xs font-pixel text-[#7C6BF5] hover:text-[#E5E7EB] underline cursor-pointer"
-                      >
-                        Coba Kirim Ulang
-                      </button>
-                    )}
-                  </div>
+            {/* P2R Result Status (loading, success, and error states rendered independently) */}
+            {submitting && (
+              <div
+                role="status"
+                aria-busy="true"
+                className="mb-4 p-3 rounded-lg bg-[#7C6BF5]/10 border border-[#7C6BF5]/30 text-center"
+              >
+                <div className="flex items-center justify-center gap-2 text-[#7C6BF5]">
+                  <div className="w-4 h-4 border-2 border-[#7C6BF5] border-t-transparent rounded-full animate-spin" />
+                  <span className="font-pixel text-xs text-[#7C6BF5]">Mengirim skor ke P2R...</span>
+                </div>
+              </div>
+            )}
+
+            {!submitting && p2rResult && (
+              <div className="mb-4 p-3 rounded-lg bg-[#4ADE80]/10 border border-[#4ADE80]/35 text-center">
+                <div className="text-[#4ADE80] font-pixel text-xs">
+                  ✓ Skor dikirim ke P2R (Display: {p2rDisplayScore.toFixed(2)})
+                </div>
+              </div>
+            )}
+
+            {!submitting && submitError && !p2rResult && (
+              <div
+                role="alert"
+                className="mb-4 p-3 rounded-lg bg-[#F87171]/10 border border-[#F87171]/40 text-center space-y-2"
+              >
+                <div className="text-[#F87171] font-pixel text-xs">
+                  ✗ {submitError}
+                </div>
+                {state.session?.sessionToken && state.session.status !== "completed" && (
+                  <button
+                    id="btn-retry-submit-p2r"
+                    type="button"
+                    disabled={submitting}
+                    onClick={submitToP2R}
+                    className="text-xs font-pixel text-[#E5E7EB] bg-[#7C6BF5]/25 hover:bg-[#7C6BF5]/40 border border-[#7C6BF5]/50 rounded px-3 py-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    Coba Kirim Ulang
+                  </button>
                 )}
               </div>
             )}

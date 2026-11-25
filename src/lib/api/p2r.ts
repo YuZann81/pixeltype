@@ -181,38 +181,13 @@ export async function getGamesList(params?: {
 }
 
 /**
- * Events
- */
-
-export interface Event {
-  id: string;
-  slug: string;
-  name: string;
-  starts_at: string;
-  ends_at: string;
-  is_active: boolean;
-  is_currently_effective?: boolean;
-}
-
-export interface EventsResponse {
-  success: boolean;
-  message: string;
-  data: Event[];
-}
-
-export async function getEventsForGame(gameSlug: string, options?: ApiRequestOptions) {
-  return apiGet<EventsResponse>("/events", {
-    ...options,
-    searchParams: { game: gameSlug },
-  });
-}
-
-/**
  * Game Sessions
+ *
+ * Active global event resolution is handled server-side by P2R Core API;
+ * PixelType never discovers or sends `event_id`.
  */
 
 export interface StartSessionRequest {
-  event_id?: string | null;
   platform?: string;
   game_version?: string;
   idempotency_key: string;
@@ -302,7 +277,6 @@ export async function completeSession(
 export interface SpendActionRequest {
   action_code: string;
   session_id?: string;
-  event_id?: string;
   idempotency_key?: string;
 }
 
@@ -409,7 +383,6 @@ export interface LeaderboardResponse {
 export async function getLeaderboard(
   gameSlug: string,
   params?: {
-    event_id?: string;
     limit?: number;
     offset?: number;
   },
@@ -418,10 +391,6 @@ export async function getLeaderboard(
   return apiGet<LeaderboardResponse>(`/games/${gameSlug}/leaderboard`, {
     ...options,
     searchParams: params,
-    headers: {
-      ...options?.headers,
-      "X-Game-Access-Token": options?.gameToken || "",
-    },
   });
 }
 

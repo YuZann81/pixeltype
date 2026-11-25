@@ -8,7 +8,7 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
-import { getOrFetchGameToken } from "./gameTokenService.ts";
+import { handleGameTokenRequest } from "./gameTokenService.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,24 +31,19 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "pixeltype-server" });
 });
 
-// Secure server-side game token endpoints
+// Secure server-side game token endpoints (requires valid player Bearer auth)
 const handleGameToken = async (req: express.Request, res: express.Response) => {
-  try {
-    const forceRefresh = req.query.force === "true";
-    const tokenData = await getOrFetchGameToken({ forceRefresh });
-    res.json({
-      success: true,
-      message: "Game access token issued successfully.",
-      data: tokenData,
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Failed to acquire game access token";
-    console.error("[P2R Token Server] Error acquiring token:", message);
-    res.status(500).json({
-      success: false,
-      message,
-    });
+  const forceRefresh = req.query.force === "true";
+  const result = await handleGameTokenRequest({
+    authHeader: req.headers.authorization,
+    forceRefresh,
+  });
+
+  if (result.status >= 500) {
+    console.error("[P2R Token Server] Error acquiring token:", result.body.message);
   }
+
+  res.status(result.status).json(result.body);
 };
 
 app.post("/api/bff/game-token", handleGameToken);
