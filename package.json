@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build:client": "vite build",
-    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/index.mjs",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=cjs --outfile=dist-server/index.cjs",
     "build": "npm run build:client && npm run build:server",
     "preview": "vite preview",
-    "start": "node dist-server/index.mjs",
+    "start": "node dist-server/index.cjs",
     "start:dev": "tsx src/server/index.ts",
     "test": "tsx --test src/**/*.test.ts",
     "clean": "rm -rf dist dist-server server.js",

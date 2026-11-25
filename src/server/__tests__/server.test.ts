@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import type { AddressInfo } from "net";
 import type { Server } from "http";
-import { createApp } from "../index.ts";
+import { createApp } from "../app.ts";
 import { clearGameTokenCache } from "../gameTokenService.ts";
 
 describe("PixelType Production Express Runtime", () => {
@@ -88,6 +88,7 @@ describe("PixelType Production Express Runtime", () => {
 
     const app = createApp({
       distPath: tempDistDir,
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
       tokenConfig: {
         apiBaseUrl: "https://p2r.test/api/v1",
         gameSlug: "pixeltype",
@@ -117,13 +118,19 @@ describe("PixelType Production Express Runtime", () => {
     upstreamCalls = [];
   });
 
-  test("serves /health and /api/health with HTTP 200 JSON", async () => {
+  test("serves /health and /api/health with HTTP 200 JSON including release SHA", async () => {
     for (const endpoint of ["/health", "/api/health"]) {
       const res = await fetch(`${baseUrl}${endpoint}`);
       assert.equal(res.status, 200);
-      const body = (await res.json()) as { status: string; service: string; timestamp: string };
+      const body = (await res.json()) as {
+        status: string;
+        service: string;
+        release: string;
+        timestamp: string;
+      };
       assert.equal(body.status, "ok");
       assert.equal(body.service, "pixeltype-server");
+      assert.equal(body.release, "0123456789abcdef0123456789abcdef01234567");
       assert.ok(typeof body.timestamp === "string" && body.timestamp.length > 0);
     }
   });
