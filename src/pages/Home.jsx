@@ -13,9 +13,22 @@ export default function Home() {
 
   // Global keydown listener to trigger play navigation
   useEffect(() => {
+    const ignoredKeys = new Set([
+      "Tab",
+      "Shift",
+      "Control",
+      "Alt",
+      "Meta",
+      "Escape",
+      "CapsLock",
+      "NumLock",
+      "ScrollLock",
+      "ContextMenu",
+    ]);
+
     const handleKeyDown = (e) => {
-      // Don't trigger if user is clicking or inspecting
-      if (e.key === "Tab") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (ignoredKeys.has(e.key) || /^F\d{1,2}$/.test(e.key)) return;
       navigate("/login");
     };
 
@@ -39,29 +52,8 @@ export default function Home() {
           </span>
         </div>
 
-        {/* Kanan atas: 3 tombol kecil 1, 2, 3 & to Leaderboard link */}
-        <div className="flex flex-col items-end gap-2">
-          <div id="debug-buttons" className="flex items-center gap-2">
-            {[1, 2, 3].map((num) => (
-              <button
-                key={num}
-                id={`btn-debug-${num}`}
-                type="button"
-                onClick={() => {
-                  // Debug navigation shortcuts
-                  if (num === 1) navigate("/login");
-                  if (num === 2) navigate("/select-language");
-                  if (num === 3) navigate("/gameplay");
-                }}
-                className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-[#1A1B2E]/80 border border-[#3A2B5C] font-pixel text-xs text-[#9CA3AF] hover:text-[#E5E7EB] hover:border-[#7C6BF5] transition cursor-pointer flex items-center justify-center"
-                title={`Testing mode ${num}`}
-              >
-                {num}
-              </button>
-            ))}
-          </div>
-
-          {/* Kanan atas di bawah tombol: teks to Leaderboard */}
+        {/* Kanan atas: to Leaderboard link */}
+        <div className="flex flex-col items-end gap-2 pt-2">
           <Link
             id="link-to-leaderboard"
             to="/leaderboard"

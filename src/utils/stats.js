@@ -34,3 +34,28 @@ export function calculateScore(wpm = 0, accuracy = 100, maxCombo = 0) {
   const finalScore = Math.round(baseScore * accuracyMultiplier + comboBonus);
   return Math.max(0, finalScore);
 }
+
+/**
+ * Evaluasi input segmen saat ini terhadap targetText secara deterministik.
+ * Menjamin Backspace tidak menggelembungkan hitungan karakter atau akurasi.
+ */
+export function evaluateSegmentInput(userInput = "", targetText = "") {
+  const clampedInput = userInput.slice(0, targetText.length);
+  let correctChars = 0;
+  for (let i = 0; i < clampedInput.length; i++) {
+    if (clampedInput[i] === targetText[i]) {
+      correctChars++;
+    }
+  }
+  const typedChars = clampedInput.length;
+  const incorrectChars = Math.max(0, typedChars - correctChars);
+  const isComplete = targetText.length > 0 && typedChars === targetText.length;
+
+  return {
+    clampedInput,
+    typedChars,
+    correctChars,
+    incorrectChars,
+    isComplete,
+  };
+}
