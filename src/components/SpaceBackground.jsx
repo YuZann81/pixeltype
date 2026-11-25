@@ -61,7 +61,7 @@ export default function SpaceBackground({ variant = "full" }) {
             className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[40rem] h-[30rem] rounded-full bg-[#3A2B5C]/20 blur-3xl pointer-events-none ${nebulaClass}`}
           />
           <svg
-            className="absolute top-20 right-10 sm:right-20 w-20 h-20 opacity-25 text-[#7C6BF5]"
+            className="hidden lg:block absolute top-20 right-10 sm:right-20 w-20 h-20 opacity-25 text-[#7C6BF5]"
             viewBox="0 0 16 16"
             fill="currentColor"
             shapeRendering="crispEdges"
@@ -73,7 +73,7 @@ export default function SpaceBackground({ variant = "full" }) {
             <rect x="12" y="9" width="2" height="1" fill="#FBBF24" />
           </svg>
           <svg
-            className="absolute bottom-16 left-8 sm:left-16 w-14 h-14 opacity-20 text-[#E5E7EB]"
+            className="hidden lg:block absolute bottom-16 left-8 sm:left-16 w-14 h-14 opacity-20 text-[#E5E7EB]"
             viewBox="0 0 12 12"
             fill="currentColor"
             shapeRendering="crispEdges"

@@ -73,7 +73,7 @@ export default function Gameplay() {
   return (
     <div
       id="gameplay-page"
-      className="relative min-h-screen flex flex-col justify-between p-4 sm:p-6 select-none overflow-hidden"
+      className="relative min-h-screen flex flex-col justify-between p-4 sm:p-6 select-none overflow-y-auto overflow-x-hidden"
     >
       <SpaceBackground variant="gameplay" />
 

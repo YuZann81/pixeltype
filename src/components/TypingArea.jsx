@@ -61,11 +61,7 @@ export default function TypingArea({
     <div
       id="typing-area-container"
       onClick={handleContainerClick}
-      className={`relative w-full max-w-2xl mx-auto my-4 p-6 sm:p-8 bg-[#121528]/85 border rounded-xl cursor-text transition-all duration-150 ${
-        isFocused && !disabled
-          ? "border-[#7C6BF5] shadow-[0_0_15px_rgba(124,107,245,0.16)]"
-          : "border-[#2A2F4F]"
-      }`}
+      className="relative w-full max-w-2xl mx-auto my-4 px-2 py-4 sm:px-4 sm:py-6 bg-transparent border-0 rounded-none shadow-none cursor-text transition-all duration-150"
     >
       {/* Hidden real input for keyboard focus and mobile compatibility */}
       <input
@@ -87,11 +83,11 @@ export default function TypingArea({
         aria-label="Ketik teks di sini"
       />
 
-      {/* Rendered Text: Whole-word non-breaking wrappers with character-level states */}
+      {/* Rendered Text: Whole-word non-breaking wrappers directly over galaxy background */}
       <div
         id="typing-text-display"
         className={`font-mono-typing text-xl sm:text-2xl leading-relaxed tracking-normal select-none min-h-[6.5rem] flex flex-wrap content-start gap-y-1.5 transition-all duration-150 ${
-          !isFocused && !disabled ? "opacity-50 blur-[1.5px]" : "opacity-100"
+          !isFocused && !disabled ? "opacity-45 blur-[1.5px]" : "opacity-100"
         }`}
       >
         {wordTokens.map((token) => (
@@ -100,17 +96,17 @@ export default function TypingArea({
             className="inline-flex whitespace-nowrap max-w-full"
           >
             {token.chars.map(({ char, index }) => {
-              let charColor = "text-[#9CA3AF]/65"; // untyped
+              let charColor = "text-[#A6A9BA]"; // untyped
               const isCurrentCursor = index === userInput.length;
               const isSpace = char === " ";
 
               if (index < userInput.length) {
                 const isCorrect = userInput[index] === char;
                 if (isCorrect) {
-                  charColor = "text-[#4ADE80] font-medium";
+                  charColor = "text-[#86CFA4] font-medium";
                 } else {
                   charColor =
-                    "text-[#F87171] underline decoration-[#F87171] font-medium bg-[#F87171]/15 rounded-xs";
+                    "text-[#D98A91] underline decoration-[#D98A91] font-medium";
                 }
               }
 
@@ -122,7 +118,7 @@ export default function TypingArea({
                   {isCurrentCursor && !disabled && (
                     <span
                       aria-hidden="true"
-                      className="absolute -left-[1px] top-0.5 bottom-0.5 w-[2.5px] rounded-full bg-[#7C6BF5] shadow-[0_0_8px_rgba(124,107,245,0.8)] animate-pulse"
+                      className="absolute -left-[1px] top-0.5 bottom-0.5 w-[2px] rounded-full bg-[#C2B7FF] animate-pulse"
                     />
                   )}
                   {isSpace ? "\u00A0" : char}
@@ -137,22 +133,22 @@ export default function TypingArea({
       {!isFocused && !disabled && (
         <div
           id="typing-focus-overlay"
-          className="absolute inset-0 flex items-center justify-center rounded-xl bg-[#0B0B1F]/40 backdrop-blur-[1px] pointer-events-none"
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
         >
-          <span className="px-4 py-2 rounded-lg bg-[#121528]/95 border border-[#7C6BF5]/60 font-mono-typing text-xs text-[#FBBF24] tracking-wide shadow-lg">
+          <span className="px-4 py-2 rounded-lg bg-[#0B0B1F]/90 border border-[#3A2B5C] font-mono-typing text-xs text-[#FBBF24] tracking-wide">
             Klik area ini untuk melanjutkan mengetik
           </span>
         </div>
       )}
 
-      {/* Subtitle helper */}
-      <div className="mt-4 pt-3 border-t border-[#2A2F4F]/70 flex items-center justify-between text-xs text-[#9CA3AF]">
+      {/* Subtle character progress footer */}
+      <div className="mt-4 pt-2 flex items-center justify-between text-xs text-[#A6A9BA]/80">
         <span className={!isFocused && !disabled ? "text-[#FBBF24] font-medium" : ""}>
           {!isFocused && !disabled
             ? "Klik area ini untuk melanjutkan mengetik"
             : "Ketik sesuai urutan karakter"}
         </span>
-        <span className="text-[11px] font-mono-typing text-[#7C6BF5]/90">
+        <span className="text-[11px] font-mono-typing text-[#C2B7FF]/90">
           {userInput.length} / {targetText.length} Karakter
         </span>
       </div>
