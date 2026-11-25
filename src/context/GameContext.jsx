@@ -345,21 +345,6 @@ function gameReducer(state, action) {
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(gameReducer, initialState);
 
-  // Initialize auth state from localStorage on mount
-  useEffect(() => {
-    const token = localStorage.getItem("p2r_auth_token");
-    const userStr = localStorage.getItem("p2r_user");
-    if (token && userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        dispatch({ type: "SET_AUTH", payload: { token, user } });
-      } catch (err) {
-        localStorage.removeItem("p2r_auth_token");
-        localStorage.removeItem("p2r_user");
-      }
-    }
-  }, []);
-
   // Game token management with proactive caching & refresh
   const getValidGameToken = useCallback(async (options = {}) => {
     // If we have a cached game token with at least 30s validity left, use it
@@ -397,7 +382,10 @@ export function GameProvider({ children }) {
       if (response.success && response.data) {
         const now = new Date();
         const activeEvent = response.data.find(
-          (e) => e.is_active && new Date(e.starts_at) <= now && new Date(e.ends_at) >= now
+          (e) =>
+            typeof e.is_currently_effective === "boolean"
+              ? e.is_currently_effective
+              : e.is_active && new Date(e.starts_at) <= now && new Date(e.ends_at) >= now
         );
         return activeEvent || null;
       }
@@ -434,7 +422,7 @@ export function GameProvider({ children }) {
         response = await startSession(
           "pixeltype",
           sessionPayload,
-          { token: state.authToken, gameToken }
+          { playerToken: state.authToken, gameToken }
         );
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -443,7 +431,7 @@ export function GameProvider({ children }) {
           response = await startSession(
             "pixeltype",
             sessionPayload,
-            { token: state.authToken, gameToken }
+            { playerToken: state.authToken, gameToken }
           );
         } else {
           throw err;
@@ -500,7 +488,7 @@ export function GameProvider({ children }) {
           "pixeltype",
           state.session.id,
           completePayload,
-          { token: state.authToken, gameToken }
+          { playerToken: state.authToken, gameToken }
         );
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -510,7 +498,7 @@ export function GameProvider({ children }) {
             "pixeltype",
             state.session.id,
             completePayload,
-            { token: state.authToken, gameToken }
+            { playerToken: state.authToken, gameToken }
           );
         } else {
           throw err;
@@ -549,7 +537,7 @@ export function GameProvider({ children }) {
           event_id: state.session.eventId,
           idempotency_key: idempotencyKey,
         },
-        { token: state.authToken, gameToken }
+        { playerToken: state.authToken, gameToken }
       );
 
       if (response.success && response.data) {
@@ -633,9 +621,10 @@ export function GameProvider({ children }) {
       // Validate token with /me
       getMe({ token })
         .then((res) => {
-          if (res.success && res.data) {
-            localStorage.setItem("p2r_user", JSON.stringify(res.data.user));
-            dispatch({ type: "SET_AUTH", payload: { token, user: res.data.user } });
+          const userData = res.data?.user || res.data;
+          if (res.success && userData && userData.id) {
+            localStorage.setItem("p2r_user", JSON.stringify(userData));
+            dispatch({ type: "SET_AUTH", payload: { token, user: userData } });
             fetchWallet();
           } else {
             localStorage.removeItem("p2r_auth_token");

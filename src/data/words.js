@@ -17,7 +17,7 @@ export const wordsID = [
   "terbang", "teropong", "tinggi", "titik", "tombol", "tuntas", "uji", "udara",
   "unggul", "vektor", "waktu", "warna", "wawasan", "yakin", "zona", "fokus",
   "kilau", "lintasan", "nebula", "pulsar", "semesta", "sensor", "zenit", "pola",
-  "tangkas", "wadidaw", "astaga", "bagus"
+  "aksara", "komet", "surya", "bagus"
 ];
 
 // Daftar kata bahasa Inggris (~100 kata)
@@ -37,22 +37,29 @@ export const wordsEN = [
   "vortex", "warp", "wave", "zenith"
 ];
 
-// Contoh kalimat default sesuai dokumen layout
+// Kalimat pembuka ronde pertama
 export const sampleTextID =
-  "Ini contoh text jadi sekali lagi ini contoh text yg bagus sekali wadidaw astaga ngerinya";
+  "Mengetik dengan cepat dan akurat melatih fokus jemari kita melintasi setiap huruf dan kata";
 
 export const sampleTextEN =
   "Typing at the speed of cosmic light through planetary orbits and neon nebulae across galaxies";
 
 /**
- * Generate string teks dari kamus kata
+ * Generate string teks dari kamus kata tanpa kata duplikat berurutan
  */
 export function generateTypingSentence(language = "IND", count = 14) {
   const dictionary = language === "ENG" ? wordsEN : wordsID;
   const selected = [];
+  let prevWord = "";
   for (let i = 0; i < count; i++) {
-    const randomIndex = Math.floor(Math.random() * dictionary.length);
-    selected.push(dictionary[randomIndex]);
+    let word = dictionary[Math.floor(Math.random() * dictionary.length)];
+    if (dictionary.length > 1) {
+      while (word === prevWord) {
+        word = dictionary[Math.floor(Math.random() * dictionary.length)];
+      }
+    }
+    selected.push(word);
+    prevWord = word;
   }
   return selected.join(" ");
 }

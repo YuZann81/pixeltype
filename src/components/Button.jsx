@@ -6,7 +6,7 @@
 import React from "react";
 
 /**
- * Button component
+ * Button component — Clean Arcade Pixel Galaxy (matches Login Page style)
  * @param {'primary' | 'outline'} variant
  */
 export default function Button({
@@ -20,12 +20,12 @@ export default function Button({
   ...props
 }) {
   const baseClasses =
-    "inline-flex items-center justify-center font-medium transition-colors duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 select-none text-sm tracking-wide";
+    "inline-flex items-center justify-center font-normal transition-colors duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 select-none text-xs tracking-wide rounded-lg";
 
   const variantClasses =
     variant === "primary"
-      ? "bg-gradient-to-r from-[#7C6BF5] to-[#EC4899] text-white px-6 py-2.5 rounded-lg hover:opacity-90 active:scale-[0.98]"
-      : "border border-[#7C6BF5] text-[#E5E7EB] bg-[#7C6BF5]/10 hover:bg-[#7C6BF5]/20 px-5 py-2 rounded-lg active:scale-[0.98]";
+      ? "bg-[#5A4FC7] hover:bg-[#6A5FD8] active:scale-[0.99] text-[#E5E7F0] px-6 py-3"
+      : "border border-[#2A2F4F] text-[#A6A9BA] hover:text-[#E5E7F0] bg-[#121528]/60 hover:bg-[#121528] hover:border-[#7C6BF5]/60 px-5 py-2.5 active:scale-[0.99]";
 
   return (
     <button

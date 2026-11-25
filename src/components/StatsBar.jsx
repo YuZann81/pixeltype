@@ -23,14 +23,14 @@ export default function StatsBar({ wpm = 0, acc = 100, totalCharacters = 0 }) {
       label: "ACC",
       value: `${acc}%`,
       unit: "akurasi",
-      color: "text-[#4ADE80]",
+      color: "text-[#86CFA4]",
     },
     {
       id: "stat-total-char",
       label: "TOTAL CHARACTER",
       value: totalCharacters,
       unit: "karakter",
-      color: "text-[#E5E7EB]",
+      color: "text-[#E5E7F0]",
     },
   ];
 
@@ -43,17 +43,17 @@ export default function StatsBar({ wpm = 0, acc = 100, totalCharacters = 0 }) {
         <div
           key={stat.id}
           id={stat.id}
-          className="flex flex-col items-center justify-center p-3.5 sm:p-4 rounded-xl bg-[#1A1B2E]/60 border border-[#3A2B5C] transition-colors"
+          className="flex flex-col items-center justify-center p-3.5 sm:p-4 rounded-xl bg-[#121528]/80 border border-[#2A2F4F] transition-colors"
         >
-          <span className="font-pixel text-[10px] sm:text-xs text-[#9CA3AF] tracking-wider mb-1">
+          <span className="font-pixel font-normal text-[8px] sm:text-[9px] text-[#8E93A8] tracking-wider mb-1.5">
             {stat.label}
           </span>
           <span
-            className={`font-pixel text-lg sm:text-2xl font-bold tabular-nums ${stat.color}`}
+            className={`font-pixel font-normal text-base sm:text-xl tabular-nums ${stat.color}`}
           >
             {stat.value}
           </span>
-          <span className="text-[11px] text-[#9CA3AF]/70 mt-0.5 capitalize hidden sm:inline">
+          <span className="text-[11px] text-[#8E93A8]/70 mt-1 capitalize hidden sm:inline">
             {stat.unit}
           </span>
         </div>

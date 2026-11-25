@@ -63,11 +63,7 @@ export interface AuthResponse {
 }
 
 export async function login(credentials: LoginRequest, options?: ApiRequestOptions) {
-  const formData = new URLSearchParams();
-  formData.append("email", credentials.email);
-  formData.append("password", credentials.password);
-
-  return apiPostForm<LoginResponse>("/auth/login", formData, options);
+  return apiPost<LoginResponse>("/auth/login", credentials, options);
 }
 
 export async function logout(options?: ApiRequestOptions) {
@@ -195,6 +191,7 @@ export interface Event {
   starts_at: string;
   ends_at: string;
   is_active: boolean;
+  is_currently_effective?: boolean;
 }
 
 export interface EventsResponse {

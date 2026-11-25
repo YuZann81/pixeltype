@@ -2,14 +2,23 @@
 
 @theme {
   --font-pixel: "Press Start 2P", monospace;
+  --font-mono: "JetBrains Mono", monospace;
   --font-sans: "Inter", sans-serif;
+  --color-galaxy-base: #0B0B1F;
+  --color-galaxy-deep: #160D30;
   --color-card-border: #3A2B5C;
   --color-accent-purple: #7C6BF5;
   --color-accent-pink: #EC4899;
+  --color-accent-green: #4ADE80;
+  --color-accent-gold: #FBBF24;
 }
 
 .font-pixel {
   font-family: 'Press Start 2P', monospace;
+}
+
+.font-mono-typing {
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .font-body {
