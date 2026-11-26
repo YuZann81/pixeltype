@@ -8,11 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_to_production:
-        description: 'Deploy verified Docker runtime to Sumapod production host'
-        type: boolean
-        default: false
-      allow_loopback_only:
-        description: 'Allow activation without PIXELTYPE_PUBLIC_URL (pre-DNS staging/cutover only)'
+        description: 'Deploy verified Docker runtime from main to Sumapod production host'
         type: boolean
         default: false
 
@@ -124,10 +120,10 @@ jobs:
           if-no-files-found: error
 
   # Canonical Sumapod Docker deployment job.
-  # Runs ONLY when explicitly triggered via workflow_dispatch (deploy_to_production=true)
+  # Runs ONLY on main when explicitly triggered via workflow_dispatch (deploy_to_production=true)
   # OR on push to main when repository variable PIXELTYPE_AUTO_DEPLOY == 'true'.
-  # Fail-closed: NEVER reports green unless Docker activation, release-SHA health check,
-  # BFF 401 check, and (unless allow_loopback_only=true) public HTTPS verification all pass.
+  # Fail-closed: NEVER reports green unless SSH secrets, host runtime env, Docker activation,
+  # release-SHA loopback health, BFF 401 guard, AND public HTTPS verification all pass.
   deploy:
     name: Deploy Docker Runtime to Sumapod
     needs: ci
@@ -144,19 +140,25 @@ jobs:
           SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
           SSH_KNOWN_HOSTS: ${{ secrets.SUMAPOD_SSH_KNOWN_HOSTS }}
           PUBLIC_URL: ${{ vars.PIXELTYPE_PUBLIC_URL }}
-          ALLOW_LOOPBACK_ONLY: ${{ inputs.allow_loopback_only || false }}
         run: |
           set -euo pipefail
           for var_name in SSH_KEY SSH_HOST SSH_USER SSH_KNOWN_HOSTS; do
             if [ -z "${!var_name}" ]; then
-              echo "::error::Missing required deployment secret (${var_name}). Refusing to claim successful deployment."
+              echo "::error::Missing required deployment secret (${var_name}). Refusing to deploy."
               exit 1
             fi
           done
-          if [ -z "$PUBLIC_URL" ] && [ "$ALLOW_LOOPBACK_ONLY" != "true" ]; then
-            echo "::error::PIXELTYPE_PUBLIC_URL is unset and allow_loopback_only is false. Confirm the production domain and configure PIXELTYPE_PUBLIC_URL before deploying."
+          if [ -z "$PUBLIC_URL" ]; then
+            echo "::error::PIXELTYPE_PUBLIC_URL is unset. Confirm the production domain and configure PIXELTYPE_PUBLIC_URL (https://...) before deploying."
             exit 1
           fi
+          case "$PUBLIC_URL" in
+            https://*) ;;
+            *)
+              echo "::error::PIXELTYPE_PUBLIC_URL must use https:// (got invalid scheme). Refusing to bypass public HTTPS verification."
+              exit 1
+              ;;
+          esac
 
       - name: Download verified release artifact
         uses: actions/download-artifact@v4
@@ -228,6 +230,8 @@ jobs:
               man = json.load(fh)
           if man.get("source_commit") != expected_sha:
               raise SystemExit("Manifest source_commit mismatch")
+          if man.get("source_ref") != "refs/heads/main":
+              raise SystemExit("Manifest source_ref is not refs/heads/main")
           if man.get("archive_file") != os.path.basename(art_path):
               raise SystemExit("Manifest archive_file mismatch")
           digest = hashlib.sha256()
@@ -268,11 +272,29 @@ jobs:
 
           rollback() {
             echo "::error::Activation verification failed. Initiating automatic rollback..."
-            docker logs --tail 50 "${CONTAINER}" 2>&1 || true
+            docker logs --tail 30 "${CONTAINER}" 2>&1 || true
             if [ -n "${PREV_IMAGE}" ] && [ "${PREV_IMAGE}" != "${IMAGE}" ]; then
-              start_container "${PREV_IMAGE}"
-              sleep 3
-              curl -fsS "http://127.0.0.1:${HOST_PORT}/api/health" >/dev/null && echo "Rollback restored ${PREV_IMAGE}."
+              PREV_SHA="${PREV_IMAGE#pixeltype:}"
+              if start_container "${PREV_IMAGE}"; then
+                RB_OK=false
+                for i in $(seq 1 15); do
+                  if curl -fsS "http://127.0.0.1:${HOST_PORT}/api/health" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok' and d['service']=='pixeltype-server' and ('${PREV_SHA}' in ('', '${PREV_IMAGE}') or d.get('release')=='${PREV_SHA}')" 2>/dev/null; then
+                    RB_STATE="$(docker inspect --format '{{.State.Status}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER}" 2>/dev/null || true)"
+                    if [ "${RB_STATE}" = "running:healthy" ] || [ "${RB_STATE}" = "running:starting" ]; then
+                      RB_OK=true
+                      break
+                    fi
+                  fi
+                  sleep 1.5
+                done
+                if [ "${RB_OK}" = "true" ]; then
+                  echo "Rollback verified healthy: ${PREV_IMAGE}"
+                else
+                  echo "::error::CRITICAL: Rollback health verification failed for ${PREV_IMAGE}"
+                fi
+              else
+                echo "::error::CRITICAL: Failed to restart previous container ${PREV_IMAGE}"
+              fi
             else
               docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
               echo "No prior image available; removed failed container."
@@ -280,8 +302,8 @@ jobs:
             exit 1
           }
 
-          # 5. Activate new release container
-          start_container "${IMAGE}"
+          # 5. Activate new release container (rollback automatically even if docker run fails)
+          start_container "${IMAGE}" || rollback
 
           # 6. Verify local container health, release SHA identity, SPA fallback, and 401 BFF guard
           HEALTH_OK=false
@@ -311,16 +333,18 @@ jobs:
           [ "${DOCKER_HEALTHY}" = "true" ] || rollback
           echo "Local Docker container verified healthy and serving release ${SHA}."
 
-          # 7. Verify public HTTPS ingress when PIXELTYPE_PUBLIC_URL is configured
-          if [ -n "${PUBLIC_URL}" ]; then
-            BASE_URL="${PUBLIC_URL%/}"
-            curl -fsS "${BASE_URL}/api/health" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok' and d['release']=='${SHA}'" || rollback
-            test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/")" = "200" || rollback
-            test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/gameplay")" = "200" || rollback
-            test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/leaderboard")" = "200" || rollback
-            test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/api/bff/game-token")" = "401" || rollback
-            echo "Public HTTPS ingress verified at ${BASE_URL} for release ${SHA}."
+          # 7. Mandatory public HTTPS ingress verification (cannot be bypassed)
+          if [ -z "${PUBLIC_URL}" ]; then
+            echo "::error::Missing PUBLIC_URL during verification."
+            rollback
           fi
+          BASE_URL="${PUBLIC_URL%/}"
+          curl -fsS "${BASE_URL}/api/health" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok' and d['service']=='pixeltype-server' and d['release']=='${SHA}'" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/gameplay")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/leaderboard")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/api/bff/game-token")" = "401" || rollback
+          echo "Public HTTPS ingress verified at ${BASE_URL} for release ${SHA}."
 
           # 8. Retain the 5 most recent pixeltype images for rollback
           docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' pixeltype \
