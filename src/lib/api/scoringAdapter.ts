@@ -1,11 +1,15 @@
 /**
  * Authoritative scoring formatter & validator for PixelType.
- * Conforms strictly to P2R backend PixelTypeScoringAdapter:
+ * Conforms strictly to P2R backend PixelTypeScoringAdapter & GameScoringService:
  * - Exactly 3 rounds (duration: 30)
  * - Each round: characters_typed, correct_characters, incorrect_characters
  * - Invariant: characters_typed === correct_characters + incorrect_characters
- * - Computed outputs: accuracy, net_wpm, total_characters, completion_time_ms
+ * - Session score limit: 0 <= score <= 600 (GameResultContractService::MAX_SESSION_SCORE)
+ * - Default game-engine score formula: bounded semi-strict 3-round score (0..300)
  */
+
+import { calculateWPM, calculateAccuracy } from "../../utils/stats.js";
+import { calculateSemiStrictFinalScore } from "../../utils/semiStrictScoring.js";
 
 export interface PixelTypeRoundTelemetry {
   round?: number;
@@ -29,10 +33,34 @@ export interface PixelTypeTelemetryPayload {
 
 export const ROUND_COUNT = 3;
 export const ROUND_DURATION_SECONDS = 30;
+export const MAX_P2R_SESSION_SCORE = 600;
+
+/**
+ * Computes PixelType's bounded 3-round session score (0..300) directly from
+ * authoritative round telemetry using the semi-strict formula.
+ * Naturally complies with P2R's 0..600 session score limit without post-hoc clamping.
+ */
+export function calculatePixelTypeSessionScore(
+  rounds: ReadonlyArray<PixelTypeRoundTelemetry>,
+): number {
+  const perRoundMetrics = rounds.slice(0, ROUND_COUNT).map((r) => {
+    const duration = r.duration > 0 ? r.duration : ROUND_DURATION_SECONDS;
+    const wpm = calculateWPM(r.correct_characters, duration);
+    const acc = calculateAccuracy(r.correct_characters, r.characters_typed);
+    return { wpm, acc };
+  });
+
+  return calculateSemiStrictFinalScore(perRoundMetrics).finalScore;
+}
 
 /**
  * Formats raw round history into authoritative PixelType telemetry payload.
  * Guarantees exactly 3 rounds, duration 30, and the characters_typed invariant.
+ *
+ * When `options.finalScore` is omitted, derives the canonical bounded score
+ * from the 3 formatted rounds (0..300). When provided explicitly, preserves the
+ * supplied number without silent clamping so validation can reject out-of-range
+ * scores transparently.
  */
 export function formatPixelTypeTelemetry(
   rawRounds: Array<Partial<PixelTypeRoundTelemetry>>,
@@ -43,7 +71,6 @@ export function formatPixelTypeTelemetry(
 ): PixelTypeTelemetryPayload {
   const language = (options.language || "IND").toUpperCase();
   const langCode = language === "IND" ? "id" : language.toLowerCase();
-  const finalScore = Math.max(0, Math.round(options.finalScore ?? 0));
 
   const rounds: PixelTypeRoundTelemetry[] = [];
 
@@ -61,6 +88,11 @@ export function formatPixelTypeTelemetry(
       incorrect_characters: incorrectChars,
     });
   }
+
+  const finalScore =
+    options.finalScore !== undefined
+      ? options.finalScore
+      : calculatePixelTypeSessionScore(rounds);
 
   const totalChars = rounds.reduce((sum, r) => sum + r.characters_typed, 0);
   const totalCorrect = rounds.reduce((sum, r) => sum + r.correct_characters, 0);
@@ -85,7 +117,8 @@ export function formatPixelTypeTelemetry(
 }
 
 /**
- * Validates a telemetry payload against PixelTypeScoringAdapter rules.
+ * Validates a telemetry payload against PixelTypeScoringAdapter and
+ * GameScoringService rules (including the strict 0..600 session score cap).
  * Throws an Error if any invariant is violated.
  */
 export function validatePixelTypeTelemetry(payload: PixelTypeTelemetryPayload): void {
@@ -116,7 +149,16 @@ export function validatePixelTypeTelemetry(payload: PixelTypeTelemetryPayload): 
     }
   }
 
-  if (payload.score !== undefined && (typeof payload.score !== "number" || isNaN(payload.score) || payload.score < 0)) {
-    throw new Error("Game score must be a non-negative finite number");
+  const candidateScore = payload.best_score ?? payload.score ?? payload.overall_score;
+  if (candidateScore !== undefined) {
+    if (typeof candidateScore !== "number" || !Number.isFinite(candidateScore) || candidateScore < 0) {
+      throw new Error("Game score must be a non-negative finite number");
+    }
+
+    if (candidateScore > MAX_P2R_SESSION_SCORE) {
+      throw new Error(
+        `Game score (${candidateScore}) exceeds P2R maximum allowed session score of ${MAX_P2R_SESSION_SCORE}`
+      );
+    }
   }
 }

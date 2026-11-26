@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import SpaceBackground from "../components/SpaceBackground.jsx";
@@ -11,62 +11,72 @@ import Button from "../components/Button.jsx";
 import Card from "../components/Card.jsx";
 import { useGame } from "../context/GameContext.jsx";
 import { formatPixelTypeTelemetry, validatePixelTypeTelemetry } from "../lib/api/scoringAdapter.ts";
+import { calculateWPM, calculateAccuracy } from "../utils/stats.js";
 
 export default function Overview() {
   const navigate = useNavigate();
-  const { state, resetGame, completeP2RSession, spendCoins } = useGame();
+  const { state, resetGame, completeP2RSession } = useGame();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [p2rResult, setP2rResult] = useState(null);
-  const [retryLoading, setRetryLoading] = useState(false);
-  const [retryError, setRetryError] = useState(null);
 
-  // Submit score to P2R on mount
-  useEffect(() => {
-    if (state.isFinished && !p2rResult && !submitting && state.session) {
-      submitToP2R();
+  // Guard refs prevent duplicate session completion on StrictMode double-mount or rapid retry clicks
+  const isSubmittingRef = useRef(false);
+  const autoSubmittedSessionRef = useRef(null);
+
+  const submitToP2R = useCallback(async () => {
+    if (
+      !state.session ||
+      state.session.status === "completed" ||
+      p2rResult ||
+      isSubmittingRef.current
+    ) {
+      return;
     }
-  }, [state.isFinished, state.session]);
 
-  const submitToP2R = async () => {
-    if (!state.session || submitting) return;
-
+    isSubmittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
 
     try {
-      const finalScore = state.bestScore || state.score || 0;
+      // Derive bounded session score (0..300 <= 600) authoritatively from the 3 recorded rounds
       const telemetryData = formatPixelTypeTelemetry(state.roundData || [], {
         language: state.language || "IND",
-        finalScore,
       });
 
-      // Assert telemetry conforms strictly to PixelTypeScoringAdapter
+      // Assert telemetry & score conform strictly to PixelTypeScoringAdapter and P2R 0..600 limit
       validatePixelTypeTelemetry(telemetryData);
 
-      const result = await completeP2RSession(finalScore, telemetryData);
-      setP2rResult(result);
+      const result = await completeP2RSession(telemetryData.score, telemetryData);
+      if (result) {
+        setP2rResult(result);
+      }
     } catch (err) {
-      setSubmitError(err.message || "Gagal mengirim skor ke P2R");
+      setSubmitError(err?.message || "Gagal mengirim skor ke P2R");
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
-  };
+  }, [state.session, state.roundData, state.language, p2rResult, completeP2RSession]);
 
-  const handleRetry = async () => {
-    setRetryLoading(true);
-    setRetryError(null);
-
-    try {
-      await spendCoins("retry");
-      // After successful retry spend, reset game and go to guide for new session
-      resetGame();
-      navigate("/select-language");
-    } catch (err) {
-      setRetryError(err.message || "Gagal memulai ulang");
-    } finally {
-      setRetryLoading(false);
+  // Submit score to P2R once per active session when game finishes
+  useEffect(() => {
+    if (
+      state.isFinished &&
+      state.session?.id &&
+      state.session.status !== "completed" &&
+      !p2rResult &&
+      autoSubmittedSessionRef.current !== state.session.id
+    ) {
+      autoSubmittedSessionRef.current = state.session.id;
+      void submitToP2R();
     }
+  }, [state.isFinished, state.session, p2rResult, submitToP2R]);
+
+  const handleRetry = () => {
+    // Navigate to language selection where a single authoritative session start & coin debit occurs
+    resetGame();
+    navigate("/select-language");
   };
 
   const handleBackToMenu = () => {
@@ -91,13 +101,24 @@ export default function Overview() {
   const p2rFormulaVersion = p2rResult?.formula_version || "v1.0";
 
   const statItems = [
-    { label: "NICK", value: nick, isPixel: false, color: "text-[#E5E7EB]" },
+    { label: "NICK", value: nick, isPixel: false, color: "text-[#E5E7F0]" },
     { label: "WPM", value: wpm, isPixel: true, color: "text-[#7C6BF5]" },
-    { label: "ACC", value: `${acc}%`, isPixel: true, color: "text-[#4ADE80]" },
-    { label: "CHAR", value: charCount, isPixel: true, color: "text-[#E5E7EB]" },
-    { label: "SCORE", value: p2rDisplayScore, isPixel: true, color: "text-[#EC4899]" },
-    { label: "BEST SCORE", value: bestScore, isPixel: true, color: "text-[#FBBF24]" },
+    { label: "ACC", value: `${acc}%`, isPixel: true, color: "text-[#86CFA4]" },
+    { label: "CHAR", value: charCount, isPixel: true, color: "text-[#E5E7F0]" },
+    { label: "MAX COMBO", value: `${state.maxCombo || 0}x`, isPixel: true, color: "text-[#E8C168]" },
+    { label: "SCORE", value: p2rDisplayScore, isPixel: true, color: "text-[#C2B7FF]" },
   ];
+
+  const roundBreakdowns = (state.roundData || []).slice(0, 3).map((r, idx) => {
+    const rWpm = calculateWPM(r.correct_characters || 0, r.duration || 30);
+    const rAcc = calculateAccuracy(r.correct_characters || 0, r.characters_typed || 0);
+    return {
+      round: r.round || idx + 1,
+      wpm: rWpm,
+      acc: rAcc,
+      chars: r.characters_typed || 0,
+    };
+  });
 
   const displayScore = p2rDisplayScore || score;
 
@@ -140,22 +161,46 @@ export default function Overview() {
               </p>
             </div>
 
-            {/* P2R Result Status */}
-            {(submitting || p2rResult) && (
-              <div className="mb-4 p-3 rounded-lg bg-[#7C6BF5]/10 border border-[#7C6BF5]/30 text-center">
-                {submitting ? (
-                  <div className="flex items-center justify-center gap-2 text-[#7C6BF5]">
-                    <div className="w-4 h-4 border-2 border-[#7C6BF5] border-t-transparent rounded-full animate-spin" />
-                    <span className="font-pixel text-xs text-[#7C6BF5]">Mengirim skor ke P2R...</span>
-                  </div>
-                ) : p2rResult ? (
-                  <div className="text-[#4ADE80] font-pixel text-xs">
-                    ✓ Skor dikirim ke P2R (Display: {p2rDisplayScore.toFixed(2)})
-                  </div>
-                ) : submitError && (
-                  <div className="text-[#F87171] font-pixel text-xs">
-                    ✗ {submitError}
-                  </div>
+            {/* P2R Result Status (loading, success, and error states rendered independently) */}
+            {submitting && (
+              <div
+                role="status"
+                aria-busy="true"
+                className="mb-4 p-3 rounded-lg bg-[#7C6BF5]/10 border border-[#7C6BF5]/30 text-center"
+              >
+                <div className="flex items-center justify-center gap-2 text-[#7C6BF5]">
+                  <div className="w-4 h-4 border-2 border-[#7C6BF5] border-t-transparent rounded-full animate-spin" />
+                  <span className="font-pixel text-xs text-[#7C6BF5]">Mengirim skor ke P2R...</span>
+                </div>
+              </div>
+            )}
+
+            {!submitting && p2rResult && (
+              <div className="mb-4 p-3 rounded-lg bg-[#4ADE80]/10 border border-[#4ADE80]/35 text-center">
+                <div className="text-[#4ADE80] font-pixel text-xs">
+                  ✓ Skor dikirim ke P2R (Display: {p2rDisplayScore.toFixed(2)})
+                </div>
+              </div>
+            )}
+
+            {!submitting && submitError && !p2rResult && (
+              <div
+                role="alert"
+                className="mb-4 p-3 rounded-lg bg-[#F87171]/10 border border-[#F87171]/40 text-center space-y-2"
+              >
+                <div className="text-[#F87171] font-pixel text-xs">
+                  ✗ {submitError}
+                </div>
+                {state.session?.sessionToken && state.session.status !== "completed" && (
+                  <button
+                    id="btn-retry-submit-p2r"
+                    type="button"
+                    disabled={submitting}
+                    onClick={submitToP2R}
+                    className="text-xs font-pixel text-[#E5E7EB] bg-[#7C6BF5]/25 hover:bg-[#7C6BF5]/40 border border-[#7C6BF5]/50 rounded px-3 py-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    Coba Kirim Ulang
+                  </button>
                 )}
               </div>
             )}
@@ -184,10 +229,37 @@ export default function Overview() {
               ))}
             </div>
 
+            {/* Per-Round Breakdown (Round 1, 2, 3) */}
+            {roundBreakdowns.length > 0 && (
+              <div
+                id="overview-round-breakdown"
+                className="mb-5 p-3 rounded-lg bg-[#0B0B1F]/70 border border-[#3A2B5C] space-y-2"
+              >
+                <div className="font-pixel text-[10px] text-[#9CA3AF] tracking-wider">
+                  ROUND BREAKDOWN
+                </div>
+                <div className="divide-y divide-[#3A2B5C]/50">
+                  {roundBreakdowns.map((r) => (
+                    <div
+                      key={r.round}
+                      className="py-1.5 flex items-center justify-between text-xs font-mono-typing"
+                    >
+                      <span className="font-pixel text-[10px] text-[#7C6BF5]">
+                        R{r.round}
+                      </span>
+                      <span className="text-[#E5E7EB]">{r.wpm} WPM</span>
+                      <span className="text-[#4ADE80]">{r.acc}%</span>
+                      <span className="text-[#9CA3AF]">{r.chars} chars</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* P2R Score Details */}
             {p2rResult && (
-              <div className="mb-4 p-3 rounded-lg bg-[#EC4899]/10 border border-[#EC4899]/30 text-xs text-[#EC4899]">
-                <div className="font-pixel text-[#EC4899] mb-1">P2R RESULT</div>
+              <div className="mb-4 p-3 rounded-lg bg-[#0D1020] border border-[#2A2F4F] text-xs text-[#A6A9BA] font-mono-typing space-y-0.5">
+                <div className="font-pixel font-normal text-[9px] text-[#7C6BF5] mb-1">P2R RESULT</div>
                 <div>Display Score: {p2rDisplayScore.toFixed(2)}</div>
                 <div>Raw Score: {p2rResult.score} / {p2rScoreScale}</div>
                 <div>Formula: {p2rFormulaVersion}</div>
@@ -200,14 +272,10 @@ export default function Overview() {
                 id="btn-overview-retry"
                 variant="primary"
                 onClick={handleRetry}
-                disabled={retryLoading}
                 className="w-full font-pixel text-xs py-3"
               >
-                {retryLoading ? "Memproses Retry..." : "Main Lagi (Retry)"}
+                Main Lagi (Retry)
               </Button>
-              {retryError && (
-                <p className="text-center text-xs text-[#F87171]">{retryError}</p>
-              )}
               <Button
                 id="btn-overview-leaderboard"
                 variant="outline"

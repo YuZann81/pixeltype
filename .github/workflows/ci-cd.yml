@@ -5,6 +5,12 @@ on:
     branches: ['**']
   pull_request:
     branches: ['**']
+  workflow_dispatch:
+    inputs:
+      deploy_to_production:
+        description: 'Deploy verified Docker runtime from main to Sumapod production host'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,7 +18,7 @@ concurrency:
 
 jobs:
   ci:
-    name: Build & Verify
+    name: Build, Test & Package Docker Runtime
     runs-on: ubuntu-latest
 
     steps:
@@ -22,65 +28,150 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Run unit tests
+        run: npm test
+
       - name: Type check & lint
         run: npm run lint
 
-      - name: Production build
+      - name: Build frontend and Express server runtime
         run: npm run build
 
-      - name: Upload build artifact
+      - name: Verify runtime build outputs, secret isolation, and live Express smoke test
+        run: |
+          set -euo pipefail
+          test -f dist/index.html || { echo "Missing dist/index.html"; exit 1; }
+          test -d dist/assets || { echo "Missing dist/assets"; exit 1; }
+          test -f dist-server/index.cjs || { echo "Missing dist-server/index.cjs"; exit 1; }
+
+          if grep -rnE 'P2R_CLIENT_SECRET|P2R_CLIENT_ID|sec_[A-Za-z0-9]{10,}|p2r_game_[a-z0-9]+' dist/; then
+            echo "::error::Server credential identifiers or values leaked into client dist/ bundle."
+            exit 1
+          fi
+
+          # Boot compiled Express server and prove health, SPA fallback, API precedence, and 401 BFF guard
+          PORT=39173 PIXELTYPE_RELEASE_SHA="${GITHUB_SHA}" node dist-server/index.cjs &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:39173/api/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.25
+          done
+
+          curl -fsS http://127.0.0.1:39173/api/health | node -e "
+            const fs = require('fs');
+            const body = JSON.parse(fs.readFileSync(0, 'utf8'));
+            if (body.status !== 'ok' || body.service !== 'pixeltype-server' || body.release !== '${GITHUB_SHA}') {
+              console.error('Unexpected health payload:', body);
+              process.exit(1);
+            }
+          "
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:39173/)" = "200"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:39173/gameplay)" = "200"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:39173/api/unknown)" = "404"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:39173/api/bff/game-token)" = "401"
+          echo "Compiled Express runtime smoke check passed."
+
+      - name: Package immutable release tarball and manifest
+        run: |
+          set -euo pipefail
+          mkdir -p release-stage release-out
+          cp -r dist release-stage/dist
+          cp -r dist-server release-stage/dist-server
+          cp Dockerfile .dockerignore release-stage/
+
+          ARCHIVE="pixeltype-${GITHUB_SHA}.tar.gz"
+          tar -czf "release-out/${ARCHIVE}" -C release-stage .
+          ( cd release-out && sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256" )
+          DIGEST="$(awk '{print $1}' "release-out/${ARCHIVE}.sha256")"
+          test "${#DIGEST}" -eq 64
+
+          jq -n \
+            --arg service "pixeltype" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg source_commit "${GITHUB_SHA}" \
+            --arg source_ref "${GITHUB_REF}" \
+            --arg workflow_run_id "${GITHUB_RUN_ID}" \
+            --arg archive_file "${ARCHIVE}" \
+            --arg sha256 "${DIGEST}" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schema: 1, service: $service, repository: $repository, source_commit: $source_commit, source_ref: $source_ref, workflow_run_id: $workflow_run_id, archive_file: $archive_file, sha256: $sha256, created_at: $created_at}' \
+            > "release-out/pixeltype-${GITHUB_SHA}.manifest.json"
+          cat "release-out/pixeltype-${GITHUB_SHA}.manifest.json"
+
+      - name: Upload Docker runtime release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pixeltype-dist
-          path: dist/
-          retention-days: 7
+          name: pixeltype-${{ github.sha }}
+          path: |
+            release-out/pixeltype-${{ github.sha }}.tar.gz
+            release-out/pixeltype-${{ github.sha }}.tar.gz.sha256
+            release-out/pixeltype-${{ github.sha }}.manifest.json
+          retention-days: 14
           if-no-files-found: error
 
+  # Canonical Sumapod Docker deployment job.
+  # Runs ONLY on main when explicitly triggered via workflow_dispatch (deploy_to_production=true)
+  # OR on push to main when repository variable PIXELTYPE_AUTO_DEPLOY == 'true'.
+  # Fail-closed: NEVER reports green unless SSH secrets, host runtime env, Docker activation,
+  # release-SHA loopback health, BFF 401 guard, AND public HTTPS verification all pass.
   deploy:
-    name: Deploy to Production VPS
+    name: Deploy Docker Runtime to Sumapod
     needs: ci
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_to_production == true && github.ref == 'refs/heads/main')
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PIXELTYPE_AUTO_DEPLOY == 'true')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check deployment secrets
-        id: secrets_check
+      - name: Validate deployment configuration (fail-closed)
         env:
           SSH_KEY: ${{ secrets.SUMAPOD_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
+          SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SUMAPOD_SSH_KNOWN_HOSTS }}
+          PUBLIC_URL: ${{ vars.PIXELTYPE_PUBLIC_URL }}
         run: |
-          if [ -z "$SSH_KEY" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::SUMAPOD_SSH_KEY is not configured yet. Skipping production deployment."
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          for var_name in SSH_KEY SSH_HOST SSH_USER SSH_KNOWN_HOSTS; do
+            if [ -z "${!var_name}" ]; then
+              echo "::error::Missing required deployment secret (${var_name}). Refusing to deploy."
+              exit 1
+            fi
+          done
+          if [ -z "$PUBLIC_URL" ]; then
+            echo "::error::PIXELTYPE_PUBLIC_URL is unset. Confirm the production domain and configure PIXELTYPE_PUBLIC_URL (https://...) before deploying."
+            exit 1
           fi
+          case "$PUBLIC_URL" in
+            https://*) ;;
+            *)
+              echo "::error::PIXELTYPE_PUBLIC_URL must use https:// (got invalid scheme). Refusing to bypass public HTTPS verification."
+              exit 1
+              ;;
+          esac
 
-      - name: Download build artifact
-        if: steps.secrets_check.outputs.configured == 'true'
+      - name: Download verified release artifact
         uses: actions/download-artifact@v4
         with:
-          name: pixeltype-dist
-          path: dist
-
-      - name: Verify build artifact integrity
-        if: steps.secrets_check.outputs.configured == 'true'
-        run: |
-          test -f dist/index.html || { echo "Missing dist/index.html"; exit 1; }
-          test -d dist/assets || { echo "Missing dist/assets"; exit 1; }
-          echo "Build artifact verified."
+          name: pixeltype-${{ github.sha }}
+          path: release-out
 
       - name: Setup SSH
-        if: steps.secrets_check.outputs.configured == 'true'
         env:
           SSH_KEY: ${{ secrets.SUMAPOD_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SUMAPOD_SSH_KNOWN_HOSTS }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
@@ -88,75 +179,174 @@ jobs:
           echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Package and transfer release
-        if: steps.secrets_check.outputs.configured == 'true'
+      - name: Transfer artifact, build Docker image, activate container, and verify (with automatic rollback)
         env:
           SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
           SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
+          SHA: ${{ github.sha }}
+          HOST_PORT: ${{ vars.PIXELTYPE_HOST_PORT || '3005' }}
+          PUBLIC_URL: ${{ vars.PIXELTYPE_PUBLIC_URL }}
         run: |
-          RELEASE_ID="${GITHUB_SHA::8}-${GITHUB_RUN_ID}"
-          echo "Deploying release: ${RELEASE_ID}"
+          set -euo pipefail
+          ARCHIVE="pixeltype-${SHA}.tar.gz"
+          MANIFEST="pixeltype-${SHA}.manifest.json"
 
-          tar -czf dist.tar.gz -C dist .
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "mkdir -p /var/www/pixeltype/releases /var/www/pixeltype/tmp"
+          scp -i ~/.ssh/deploy_key \
+            "release-out/${ARCHIVE}" \
+            "release-out/${ARCHIVE}.sha256" \
+            "release-out/${MANIFEST}" \
+            "${SSH_USER}@${SSH_HOST}:/var/www/pixeltype/releases/"
 
-          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "mkdir -p /var/www/pixeltype/releases/${RELEASE_ID}"
-          scp -i ~/.ssh/deploy_key dist.tar.gz "${SSH_USER}@${SSH_HOST}:/var/www/pixeltype/releases/${RELEASE_ID}/dist.tar.gz"
+          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" bash -s -- "${SHA}" "${HOST_PORT}" "${PUBLIC_URL}" <<'REMOTE_EOF'
+          set -euo pipefail
+          SHA="$1"
+          HOST_PORT="$2"
+          PUBLIC_URL="${3:-}"
+          ROOT="/var/www/pixeltype"
+          ART="${ROOT}/releases/pixeltype-${SHA}.tar.gz"
+          MAN="${ROOT}/releases/pixeltype-${SHA}.manifest.json"
+          ENV_FILE="${ROOT}/shared/.env"
+          CONTAINER="pixeltype-production"
+          IMAGE="pixeltype:${SHA}"
 
-          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "
-            set -euo pipefail
-            cd /var/www/pixeltype/releases/${RELEASE_ID}
-            tar -xzf dist.tar.gz
-            rm dist.tar.gz
-            [ -f index.html ] && [ -d assets ]
-          "
-
-      - name: Publish release (atomic swap)
-        if: steps.secrets_check.outputs.configured == 'true'
-        env:
-          SSH_HOST: ${{ secrets.SUMAPOD_SSH_HOST }}
-          SSH_USER: ${{ secrets.SUMAPOD_SSH_USER }}
-        run: |
-          RELEASE_ID="${GITHUB_SHA::8}-${GITHUB_RUN_ID}"
-          ssh -i ~/.ssh/deploy_key "${SSH_USER}@${SSH_HOST}" "
-            set -euo pipefail
-
-            # 1. First-time transition: migrate existing dist directory to releases structure
-            if [ -d /var/www/pixeltype/dist ] && [ ! -L /var/www/pixeltype/dist ]; then
-              mkdir -p /var/www/pixeltype/releases/legacy
-              mv /var/www/pixeltype/dist /var/www/pixeltype/releases/legacy/dist
-              ln -sfn /var/www/pixeltype/releases/legacy/dist /var/www/pixeltype/dist
-            fi
-
-            # 2. Record current active release for rollback
-            if [ -L /var/www/pixeltype/dist ]; then
-              CURRENT_TARGET=\$(readlink -f /var/www/pixeltype/dist)
-              ln -sfn \"\$CURRENT_TARGET\" /var/www/pixeltype/previous
-            fi
-
-            # 3. Atomically switch dist symlink to new release
-            ln -sfn /var/www/pixeltype/releases/${RELEASE_ID} /var/www/pixeltype/dist_tmp
-            mv -Tf /var/www/pixeltype/dist_tmp /var/www/pixeltype/dist
-
-            # 4. Prune older releases, keeping the 5 most recent
-            cd /var/www/pixeltype/releases
-            ls -dt */ | tail -n +6 | xargs -r rm -rf
-          "
-
-      - name: Verify live deployment via HTTPS
-        if: steps.secrets_check.outputs.configured == 'true'
-        run: |
-          echo "Verifying live endpoints..."
-          curl -fsSI "https://pixeltype.razzan.site/"
-          curl -fsSI "https://pixeltype.razzan.site/gameplay"
-          curl -fsSI "https://pixeltype.razzan.site/leaderboard"
-          curl -fsSI "https://pixeltype.razzan.site/api/p2r/health"
-
-          # Verify unauthenticated BFF game-token route rejects with HTTP 401
-          BFF_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://pixeltype.razzan.site/api/bff/game-token")
-          if [ "$BFF_STATUS" != "401" ]; then
-            echo "BFF check failed: expected HTTP 401, got $BFF_STATUS"
+          # 1. Verify runtime env file exists and defines all required server-side keys (never print values)
+          if [ ! -f "${ENV_FILE}" ]; then
+            echo "::error::Missing host runtime env file: ${ENV_FILE}"
             exit 1
           fi
-          echo "BFF unauthenticated check passed (HTTP 401)."
+          for req_key in P2R_API_BASE_URL P2R_GAME_SLUG P2R_PLATFORM P2R_CLIENT_ID P2R_CLIENT_SECRET; do
+            if ! grep -qE "^${req_key}=.+" "${ENV_FILE}"; then
+              echo "::error::Required runtime variable ${req_key} is missing or empty in ${ENV_FILE}"
+              exit 1
+            fi
+          done
 
-          echo "Deployment verified successfully."
+          # 2. Verify manifest and SHA-256 checksum + archive path safety
+          python3 - "${MAN}" "${SHA}" "${ART}" <<'PY'
+          import hashlib, json, os, sys
+          man_path, expected_sha, art_path = sys.argv[1], sys.argv[2], sys.argv[3]
+          with open(man_path, "r", encoding="utf-8") as fh:
+              man = json.load(fh)
+          if man.get("source_commit") != expected_sha:
+              raise SystemExit("Manifest source_commit mismatch")
+          if man.get("source_ref") != "refs/heads/main":
+              raise SystemExit("Manifest source_ref is not refs/heads/main")
+          if man.get("archive_file") != os.path.basename(art_path):
+              raise SystemExit("Manifest archive_file mismatch")
+          digest = hashlib.sha256()
+          with open(art_path, "rb") as fh:
+              for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          if digest.hexdigest() != man.get("sha256"):
+              raise SystemExit("Artifact SHA-256 mismatch")
+          print("Artifact and manifest verified:", digest.hexdigest())
+          PY
+
+          if tar -tzf "${ART}" | grep -E '(^/|(^|/)\.\./)' >/dev/null; then
+            echo "::error::Unsafe archive path detected"
+            exit 1
+          fi
+
+          # 3. Verify local base image and build immutable release image from isolated context
+          docker image inspect node:24-alpine >/dev/null
+          BUILD_DIR="$(mktemp -d "${ROOT}/tmp/build-${SHA}.XXXXXX")"
+          trap 'rm -rf "${BUILD_DIR}"' EXIT
+          tar -xzf "${ART}" -C "${BUILD_DIR}"
+          docker build --pull=false --build-arg "RELEASE_SHA=${SHA}" -t "${IMAGE}" "${BUILD_DIR}"
+
+          # 4. Record previous image for automatic rollback
+          PREV_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${CONTAINER}" 2>/dev/null || true)"
+          echo "Previous image: ${PREV_IMAGE:-<none>}"
+
+          start_container() {
+            local target_img="$1"
+            docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+            docker run -d \
+              --name "${CONTAINER}" \
+              --restart unless-stopped \
+              --env-file "${ENV_FILE}" \
+              -p "127.0.0.1:${HOST_PORT}:3000" \
+              "${target_img}" >/dev/null
+          }
+
+          rollback() {
+            echo "::error::Activation verification failed. Initiating automatic rollback..."
+            docker logs --tail 30 "${CONTAINER}" 2>&1 || true
+            if [ -n "${PREV_IMAGE}" ] && [ "${PREV_IMAGE}" != "${IMAGE}" ]; then
+              PREV_SHA="${PREV_IMAGE#pixeltype:}"
+              if start_container "${PREV_IMAGE}"; then
+                RB_OK=false
+                for i in $(seq 1 15); do
+                  if curl -fsS "http://127.0.0.1:${HOST_PORT}/api/health" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok' and d['service']=='pixeltype-server' and ('${PREV_SHA}' in ('', '${PREV_IMAGE}') or d.get('release')=='${PREV_SHA}')" 2>/dev/null; then
+                    RB_STATE="$(docker inspect --format '{{.State.Status}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER}" 2>/dev/null || true)"
+                    if [ "${RB_STATE}" = "running:healthy" ] || [ "${RB_STATE}" = "running:starting" ]; then
+                      RB_OK=true
+                      break
+                    fi
+                  fi
+                  sleep 1.5
+                done
+                if [ "${RB_OK}" = "true" ]; then
+                  echo "Rollback verified healthy: ${PREV_IMAGE}"
+                else
+                  echo "::error::CRITICAL: Rollback health verification failed for ${PREV_IMAGE}"
+                fi
+              else
+                echo "::error::CRITICAL: Failed to restart previous container ${PREV_IMAGE}"
+              fi
+            else
+              docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+              echo "No prior image available; removed failed container."
+            fi
+            exit 1
+          }
+
+          # 5. Activate new release container (rollback automatically even if docker run fails)
+          start_container "${IMAGE}" || rollback
+
+          # 6. Verify local container health, release SHA identity, SPA fallback, and 401 BFF guard
+          HEALTH_OK=false
+          for i in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:${HOST_PORT}/api/health" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok' and d['service']=='pixeltype-server' and d['release']=='${SHA}'" 2>/dev/null; then
+              HEALTH_OK=true
+              break
+            fi
+            sleep 1.5
+          done
+          [ "${HEALTH_OK}" = "true" ] || rollback
+
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/gameplay")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${HOST_PORT}/api/bff/game-token")" = "401" || rollback
+
+          # Wait for Docker HEALTHCHECK to reach healthy
+          DOCKER_HEALTHY=false
+          for i in $(seq 1 15); do
+            STATE="$(docker inspect --format '{{.State.Status}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER}")"
+            if [ "${STATE}" = "running:healthy" ]; then
+              DOCKER_HEALTHY=true
+              break
+            fi
+            sleep 2
+          done
+          [ "${DOCKER_HEALTHY}" = "true" ] || rollback
+          echo "Local Docker container verified healthy and serving release ${SHA}."
+
+          # 7. Mandatory public HTTPS ingress verification (cannot be bypassed)
+          if [ -z "${PUBLIC_URL}" ]; then
+            echo "::error::Missing PUBLIC_URL during verification."
+            rollback
+          fi
+          BASE_URL="${PUBLIC_URL%/}"
+          curl -fsS "${BASE_URL}/api/health" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='ok' and d['service']=='pixeltype-server' and d['release']=='${SHA}'" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/gameplay")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "${BASE_URL}/leaderboard")" = "200" || rollback
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/api/bff/game-token")" = "401" || rollback
+          echo "Public HTTPS ingress verified at ${BASE_URL} for release ${SHA}."
+
+          # 8. Retain the 5 most recent pixeltype images for rollback
+          docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' pixeltype \
+            | sort -r | tail -n +6 | awk -F'\t' '{print $2}' | xargs -r docker rmi || true
+          REMOTE_EOF

@@ -8,7 +8,6 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import SpaceBackground from "../components/SpaceBackground.jsx";
 import Card from "../components/Card.jsx";
-import Button from "../components/Button.jsx";
 import { useGame } from "../context/GameContext.jsx";
 
 const REQUIRED_SESSION_COINS = 100;
@@ -74,7 +73,7 @@ export default function SelectLanguage() {
       setShowConfirmModal(false);
       navigate("/guide");
     } catch (err) {
-      setError(err.message || "Gagal memulai sesi game");
+      setError(err.message || "Failed to start game session");
       setShowConfirmModal(false);
     } finally {
       setLoading(false);
@@ -84,78 +83,87 @@ export default function SelectLanguage() {
   return (
     <div
       id="select-language-page"
-      className="relative min-h-screen flex flex-col justify-between items-center p-6 sm:p-10 select-none overflow-hidden"
+      className="relative min-h-screen flex flex-col justify-between items-center px-5 py-6 sm:px-8 sm:py-7 select-none overflow-x-hidden"
     >
-      <SpaceBackground variant="dim" />
+      <SpaceBackground variant="gameplay" />
 
-      {/* Atas: PixelType (font pixel, kecil) */}
-      <header className="w-full max-w-2xl mx-auto flex items-center justify-between pt-2 z-10">
+      {/* Subtle atmospheric vignette */}
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 pointer-events-none -z-10 bg-[radial-gradient(ellipse_at_center,rgba(11,11,31,0.12)_0%,rgba(11,11,31,0.72)_100%)]"
+      />
+
+      {/* Minimal Header */}
+      <header className="w-full max-w-5xl mx-auto flex items-center justify-between z-10">
         <span
           id="select-lang-logo"
-          className="font-pixel text-xs sm:text-sm text-[#E5E7EB] tracking-widest"
+          className="font-pixel font-normal text-[10px] sm:text-xs text-[#E5E7F0]/90 tracking-widest"
         >
           PixelType
         </span>
         <div id="select-lang-balance" className="flex items-center gap-2">
-          <span className="font-pixel text-[11px] text-[#9CA3AF]">SALDO:</span>
-          <span className="font-pixel text-xs text-[#FBBF24]">
+          <span className="font-pixel font-normal text-[8px] text-[#8E93A8] tracking-wider">
+            BALANCE:
+          </span>
+          <span className="font-pixel font-normal text-[9px] sm:text-[10px] text-[#E8C168]">
             {currentCoins} COIN
           </span>
         </div>
       </header>
 
-      {/* Tengah: Judul + 2 Card Kotak */}
-      <main className="w-full max-w-xl mx-auto flex-1 flex flex-col items-center justify-center gap-8 my-4 z-10">
+      {/* Main Language Selection */}
+      <main className="w-full max-w-lg mx-auto flex-1 flex flex-col items-center justify-center gap-8 my-6 z-10">
         <motion.div
-          initial={{ opacity: 0, y: -8 }}
+          initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.3 }}
           className="text-center"
         >
           <h1
             id="select-lang-title"
-            className="font-pixel text-xl sm:text-2xl text-[#E5E7EB] tracking-wide"
+            className="font-pixel font-normal text-base sm:text-lg text-[#E5E7F0] tracking-wide leading-relaxed"
           >
-            Select Your Bahasa
+            Pick Your Language
           </h1>
+          <p className="font-body text-xs sm:text-sm text-[#8E93A8] mt-2">
+            Choose the word list language for your 3-round typing session.
+          </p>
         </motion.div>
 
-        {/* 2 Card Kotak: ENG & IND */}
+        {/* Language Option Cards: ENG & IND */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
+          initial={{ opacity: 0, scale: 0.99 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-          className="grid grid-cols-2 gap-4 sm:gap-6 w-full max-w-md"
+          transition={{ duration: 0.3, delay: 0.05 }}
+          className="grid grid-cols-2 gap-4 sm:gap-5 w-full max-w-md"
         >
           {/* Card ENG */}
           <div
             id="card-lang-eng"
             onClick={() => setSelected("ENG")}
             onDoubleClick={() => handleOpenConfirm("ENG")}
-            className={`cursor-pointer transition-all duration-200 transform ${
-              selected === "ENG"
-                ? "scale-[1.03]"
-                : "opacity-80 hover:opacity-100"
-            }`}
+            className="cursor-pointer transition-all duration-150"
           >
             <Card
-              className={`h-36 sm:h-44 flex flex-col items-center justify-center gap-2 text-center transition-colors ${
+              className={`h-36 sm:h-40 flex flex-col items-center justify-center gap-2.5 text-center transition-colors ${
                 selected === "ENG"
-                  ? "border-2 border-[#7C6BF5] bg-[rgba(35,32,65,0.7)] shadow-lg"
-                  : "border border-[#3A2B5C] hover:border-[#7C6BF5]/40"
+                  ? "border-[#7C6BF5] bg-[#171B34]"
+                  : "border-[#2A2F4F] bg-[#121528]/75 hover:border-[#7C6BF5]/50"
               }`}
             >
-              <span className="font-pixel text-2xl sm:text-3xl font-bold text-[#E5E7EB]">
+              <span className="font-pixel font-normal text-lg sm:text-xl text-[#E5E7F0] tracking-wider">
                 ENG
               </span>
-              <span className="text-xs text-[#9CA3AF] tracking-wide">
-                English Vocabulary
+              <span className="font-body text-xs text-[#A6A9BA]">
+                English
               </span>
-              {selected === "ENG" && (
-                <span className="font-pixel text-[10px] text-[#7C6BF5] mt-1">
-                  [ SELECTED ]
-                </span>
-              )}
+              <span
+                className={`font-pixel font-normal text-[8px] tracking-wider mt-1 ${
+                  selected === "ENG" ? "text-[#7C6BF5]" : "text-transparent"
+                }`}
+              >
+                SELECTED
+              </span>
             </Card>
           </div>
 
@@ -164,157 +172,149 @@ export default function SelectLanguage() {
             id="card-lang-ind"
             onClick={() => setSelected("IND")}
             onDoubleClick={() => handleOpenConfirm("IND")}
-            className={`cursor-pointer transition-all duration-200 transform ${
-              selected === "IND"
-                ? "scale-[1.03]"
-                : "opacity-80 hover:opacity-100"
-            }`}
+            className="cursor-pointer transition-all duration-150"
           >
             <Card
-              className={`h-36 sm:h-44 flex flex-col items-center justify-center gap-2 text-center transition-colors ${
+              className={`h-36 sm:h-40 flex flex-col items-center justify-center gap-2.5 text-center transition-colors ${
                 selected === "IND"
-                  ? "border-2 border-[#7C6BF5] bg-[rgba(35,32,65,0.7)] shadow-lg"
-                  : "border border-[#3A2B5C] hover:border-[#7C6BF5]/40"
+                  ? "border-[#7C6BF5] bg-[#171B34]"
+                  : "border-[#2A2F4F] bg-[#121528]/75 hover:border-[#7C6BF5]/50"
               }`}
             >
-              <span className="font-pixel text-2xl sm:text-3xl font-bold text-[#E5E7EB]">
+              <span className="font-pixel font-normal text-lg sm:text-xl text-[#E5E7F0] tracking-wider">
                 IND
               </span>
-              <span className="text-xs text-[#9CA3AF] tracking-wide">
-                Bahasa Indonesia
+              <span className="font-body text-xs text-[#A6A9BA]">
+                Indonesian
               </span>
-              {selected === "IND" && (
-                <span className="font-pixel text-[10px] text-[#7C6BF5] mt-1">
-                  [ SELECTED ]
-                </span>
-              )}
+              <span
+                className={`font-pixel font-normal text-[8px] tracking-wider mt-1 ${
+                  selected === "IND" ? "text-[#7C6BF5]" : "text-transparent"
+                }`}
+              >
+                SELECTED
+              </span>
             </Card>
           </div>
         </motion.div>
 
         {/* Error display */}
         {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-md text-center text-xs text-[#F87171] bg-[#F87171]/10 border border-[#F87171]/30 px-4 py-3 rounded-lg"
-          >
+          <div className="w-full max-w-md text-xs font-body text-[#D98A91] border-l-2 border-[#D98A91]/70 pl-3 py-1">
             {error}
-          </motion.div>
+          </div>
         )}
 
-        {/* Bawah card: teks Press enter to pick your bahasa */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-          className="text-center"
-        >
-          <p
+        {/* Continue Prompt */}
+        <div className="text-center">
+          <button
             id="select-lang-hint"
+            type="button"
             onClick={() => handleOpenConfirm(selected)}
-            className="text-xs sm:text-sm text-[#9CA3AF] tracking-wide cursor-pointer hover:text-[#E5E7EB] transition"
+            className="py-3 px-7 rounded-lg bg-[#5A4FC7] hover:bg-[#6A5FD8] active:scale-[0.99] text-[#E5E7F0] font-pixel font-normal text-[9px] sm:text-[10px] leading-relaxed tracking-widest transition-colors cursor-pointer"
           >
-            Press <span className="text-[#7C6BF5] font-semibold">ENTER</span> or click to pick your bahasa
+            Continue
+          </button>
+          <p className="font-body text-xs text-[#8E93A8] mt-3">
+            Use arrow keys to switch, then press Enter to confirm.
           </p>
-        </motion.div>
+        </div>
       </main>
 
-      {/* Footer subtle tag */}
-      <footer className="w-full max-w-2xl mx-auto text-center text-[11px] text-[#9CA3AF]/60 z-10">
-        PILIH BAHASA UNTUK KATA-KATA TYPING
+      {/* Subtle Footer */}
+      <footer className="w-full max-w-5xl mx-auto text-center font-pixel font-normal text-[7px] sm:text-[8px] tracking-widest text-[#8E93A8]/50 z-10">
+        PixelType Galaxy
       </footer>
 
-      {/* Modal Konfirmasi Biaya Sesi */}
+      {/* P2R Session Confirmation Modal — Clean Login-Style Button */}
       <AnimatePresence>
         {showConfirmModal && (
           <div
             id="modal-confirm-session-backdrop"
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0B0B1F]/80 backdrop-blur-[2px]"
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              initial={{ opacity: 0, scale: 0.97, y: 6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ duration: 0.2 }}
+              exit={{ opacity: 0, scale: 0.97, y: 6 }}
+              transition={{ duration: 0.18 }}
               className="w-full max-w-md"
             >
-              <Card className="p-6 sm:p-7 border-2 border-[#7C6BF5]/60 bg-[#0F1026] shadow-2xl space-y-5">
-                <div className="text-center space-y-1">
-                  <span className="font-pixel text-[10px] text-[#7C6BF5] uppercase tracking-widest">
-                    P2R ARCADE CONFIRMATION
+              <Card className="p-6 sm:p-7 border border-[#2A2F4F] bg-[#121528] space-y-5">
+                <div className="text-center space-y-2">
+                  <span className="font-pixel font-normal text-[8px] text-[#8E93A8] uppercase tracking-widest">
+                    P2R Session Confirmation
                   </span>
                   <h2
                     id="modal-confirm-title"
-                    className="font-pixel text-xl sm:text-2xl text-[#E5E7EB] tracking-wide"
+                    className="font-pixel font-normal text-sm sm:text-base text-[#E5E7F0] tracking-wide leading-relaxed"
                   >
-                    Mulai Sesi Permainan?
+                    Start Game Session?
                   </h2>
-                  <p className="text-xs text-[#9CA3AF]">
-                    Memulai permainan PixelType akan menggunakan {REQUIRED_SESSION_COINS} P2R Coin.
+                  <p className="font-body text-xs text-[#A6A9BA] leading-relaxed">
+                    Starting a PixelType session requires {REQUIRED_SESSION_COINS} P2R Coins.
                   </p>
                 </div>
 
-                {/* Info Card Saldo & Biaya */}
+                {/* Session Fee & Balance Details */}
                 <div
                   id="modal-confirm-details"
-                  className="rounded-lg bg-[#0B0B1F]/90 border border-[#3A2B5C] p-4 space-y-2.5 text-xs"
+                  className="rounded-lg bg-[#0D1020] border border-[#232845] p-4 space-y-3 text-xs font-body"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[#9CA3AF]">Bahasa Dipilih:</span>
-                    <span className="font-semibold text-[#E5E7EB]">
-                      {selected === "IND" ? "Bahasa Indonesia (IND)" : "English (ENG)"}
+                    <span className="text-[#8E93A8]">Selected Language</span>
+                    <span className="font-medium text-[#E5E7F0]">
+                      {selected === "IND" ? "Indonesian (IND)" : "English (ENG)"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between border-t border-[#3A2B5C]/50 pt-2">
-                    <span className="text-[#9CA3AF]">Biaya Sesi:</span>
-                    <span className="font-pixel text-[#FBBF24]">
-                      {REQUIRED_SESSION_COINS} P2R COIN
+                  <div className="flex items-center justify-between border-t border-[#1E233D] pt-2.5">
+                    <span className="text-[#8E93A8]">Session Fee</span>
+                    <span className="font-pixel font-normal text-[9px] text-[#E8C168]">
+                      {REQUIRED_SESSION_COINS} COIN
                     </span>
                   </div>
-                  <div className="flex items-center justify-between border-t border-[#3A2B5C]/50 pt-2">
-                    <span className="text-[#9CA3AF]">Saldo Aktual Anda:</span>
+                  <div className="flex items-center justify-between border-t border-[#1E233D] pt-2.5">
+                    <span className="text-[#8E93A8]">Current Balance</span>
                     <span
-                      className={`font-pixel font-bold ${
-                        hasEnoughCoins ? "text-[#4ADE80]" : "text-[#F87171]"
+                      className={`font-pixel font-normal text-[9px] ${
+                        hasEnoughCoins ? "text-[#86CFA4]" : "text-[#D98A91]"
                       }`}
                     >
-                      {currentCoins} P2R COIN
+                      {currentCoins} COIN
                     </span>
                   </div>
                 </div>
 
-                {/* Pesan Error Saldo Tidak Cukup */}
+                {/* Insufficient Balance Warning */}
                 {!hasEnoughCoins && (
                   <div
                     id="modal-insufficient-coin-warning"
-                    className="p-3 rounded-lg bg-[#F87171]/15 border border-[#F87171]/40 text-xs text-[#F87171] leading-relaxed text-center"
+                    className="border-l-2 border-[#D98A91]/70 pl-3 py-1 text-xs font-body text-[#D98A91] leading-relaxed"
                   >
-                    Saldo P2R Coin Anda tidak mencukupi (Minimal {REQUIRED_SESSION_COINS} Coin).
-                    Saldo saat ini: {currentCoins} Coin.
+                    Insufficient P2R Coins (minimum {REQUIRED_SESSION_COINS} coins required). Current balance: {currentCoins} coins.
                   </div>
                 )}
 
-                {/* Tombol Aksi: Batal & Lanjutkan */}
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <Button
+                {/* Action Buttons: Secondary Cancel + Login-Style Confirm */}
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <button
                     id="btn-cancel-session"
-                    variant="outline"
+                    type="button"
                     onClick={() => setShowConfirmModal(false)}
                     disabled={loading}
-                    className="w-full font-pixel text-xs py-2.5"
+                    className="w-full py-3 px-4 rounded-lg bg-transparent border border-[#2A2F4F] hover:border-[#7C6BF5]/50 hover:bg-[#171B34] text-[#A6A9BA] hover:text-[#E5E7F0] font-pixel font-normal text-[9px] sm:text-[10px] leading-relaxed tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Batal
-                  </Button>
-                  <Button
+                    Cancel
+                  </button>
+                  <button
                     id="btn-confirm-session"
-                    variant="primary"
+                    type="button"
                     onClick={handleStartSession}
                     disabled={!hasEnoughCoins || loading}
-                    className="w-full font-pixel text-xs py-2.5"
+                    className="w-full py-3 px-4 rounded-lg bg-[#5A4FC7] hover:bg-[#6A5FD8] active:scale-[0.99] text-[#E5E7F0] font-pixel font-normal text-[9px] sm:text-[10px] leading-relaxed tracking-widest transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {loading ? "Memproses..." : "Lanjutkan"}
-                  </Button>
+                    {loading ? "Processing..." : "Confirm"}
+                  </button>
                 </div>
               </Card>
             </motion.div>

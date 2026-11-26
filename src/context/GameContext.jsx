@@ -10,13 +10,17 @@ import {
   getHistory,
   addHistory,
 } from "../utils/storage.js";
-import { calculateWPM, calculateAccuracy, calculateScore } from "../utils/stats.js";
+import { calculateWPM, calculateAccuracy } from "../utils/stats.js";
+import { calculateSemiStrictRoundScore } from "../utils/semiStrictScoring.js";
+import {
+  calculatePixelTypeSessionScore,
+  validatePixelTypeTelemetry,
+} from "../lib/api/scoringAdapter.ts";
 import {
   login,
   logout,
   getMe,
   getGameAccessTokenViaProxy,
-  getEventsForGame,
   startSession,
   completeSession,
   spendAction,
@@ -205,7 +209,19 @@ function gameReducer(state, action) {
       const { correctChars, totalChars, elapsedSeconds } = action.payload;
       const wpm = calculateWPM(correctChars, elapsedSeconds);
       const acc = calculateAccuracy(correctChars, totalChars);
-      const score = calculateScore(wpm, acc, state.maxCombo);
+
+      // Compute bounded live score using the same semi-strict formula (0..300)
+      // that will be submitted authoritatively to P2R (strictly <= 600 limit).
+      const completedScore = state.roundData.reduce((sum, r) => {
+        const rWpm = calculateWPM(r.correct_characters || 0, r.duration || INITIAL_ROUND_TIME);
+        const rAcc = calculateAccuracy(r.correct_characters || 0, r.characters_typed || 0);
+        return sum + calculateSemiStrictRoundScore(rWpm, rAcc);
+      }, 0);
+      const currentRoundScore =
+        state.roundData.length < state.totalRounds
+          ? calculateSemiStrictRoundScore(wpm, acc)
+          : 0;
+      const score = Math.round(completedScore + currentRoundScore);
 
       return {
         ...state,
@@ -219,10 +235,13 @@ function gameReducer(state, action) {
     }
 
     case "RECORD_ROUND": {
-      // Record round telemetry for P2R submission
+      // Record round telemetry for P2R submission and update canonical bounded score
+      const nextRoundData = [...state.roundData, action.payload];
+      const score = calculatePixelTypeSessionScore(nextRoundData);
       return {
         ...state,
-        roundData: [...state.roundData, action.payload],
+        roundData: nextRoundData,
+        score,
       };
     }
 
@@ -244,20 +263,15 @@ function gameReducer(state, action) {
     }
 
     case "END_GAME": {
-      const finalScore = state.score;
+      const finalScore =
+        state.roundData.length > 0
+          ? calculatePixelTypeSessionScore(state.roundData)
+          : state.score;
       const bestScore = Math.max(state.bestScore, finalScore);
-      const gameRecord = {
-        nick: state.user?.nick || "Guest",
-        wpm: state.wpm,
-        acc: state.acc,
-        charCount: state.charCount,
-        score: finalScore,
-        maxCombo: state.maxCombo,
-        date: new Date().toISOString(),
-      };
 
       return {
         ...state,
+        score: finalScore,
         isPlaying: false,
         isFinished: true,
         bestScore,
@@ -345,21 +359,6 @@ function gameReducer(state, action) {
 export function GameProvider({ children }) {
   const [state, dispatch] = useReducer(gameReducer, initialState);
 
-  // Initialize auth state from localStorage on mount
-  useEffect(() => {
-    const token = localStorage.getItem("p2r_auth_token");
-    const userStr = localStorage.getItem("p2r_user");
-    if (token && userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        dispatch({ type: "SET_AUTH", payload: { token, user } });
-      } catch (err) {
-        localStorage.removeItem("p2r_auth_token");
-        localStorage.removeItem("p2r_user");
-      }
-    }
-  }, []);
-
   // Game token management with proactive caching & refresh
   const getValidGameToken = useCallback(async (options = {}) => {
     // If we have a cached game token with at least 30s validity left, use it
@@ -370,6 +369,7 @@ export function GameProvider({ children }) {
     try {
       const response = await getGameAccessTokenViaProxy("pixeltype", {
         token: state.authToken || undefined,
+        searchParams: options.forceRefresh ? { force: true } : undefined,
       });
 
       if (response.success && response.data) {
@@ -390,30 +390,11 @@ export function GameProvider({ children }) {
     }
   }, [state.authToken, state.gameToken, state.gameTokenExpiry]);
 
-  // Event discovery
-  const fetchActiveEvent = useCallback(async () => {
-    try {
-      const response = await getEventsForGame("pixeltype", { token: state.authToken });
-      if (response.success && response.data) {
-        const now = new Date();
-        const activeEvent = response.data.find(
-          (e) => e.is_active && new Date(e.starts_at) <= now && new Date(e.ends_at) >= now
-        );
-        return activeEvent || null;
-      }
-      return null;
-    } catch (err) {
-      console.error("[P2R] Event discovery failed:", err);
-      return null;
-    }
-  }, [state.authToken]);
-
-  // Session start
+  // Session start (active global event is resolved server-side by P2R API)
   const startP2RSession = useCallback(async () => {
     dispatch({ type: "SESSION_STARTING" });
 
     try {
-      const event = await fetchActiveEvent();
       let gameToken = await getValidGameToken();
 
       const idempotencyKey = `session_start_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -425,16 +406,12 @@ export function GameProvider({ children }) {
         metadata: { language: state.language },
       };
 
-      if (event?.id) {
-        sessionPayload.event_id = event.id;
-      }
-
       let response;
       try {
         response = await startSession(
           "pixeltype",
           sessionPayload,
-          { token: state.authToken, gameToken }
+          { playerToken: state.authToken, gameToken }
         );
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -443,7 +420,7 @@ export function GameProvider({ children }) {
           response = await startSession(
             "pixeltype",
             sessionPayload,
-            { token: state.authToken, gameToken }
+            { playerToken: state.authToken, gameToken }
           );
         } else {
           throw err;
@@ -458,7 +435,7 @@ export function GameProvider({ children }) {
             id: session.id,
             status: session.status,
             sessionToken: session_token,
-            eventId: session.event_id || event?.id || null,
+            eventId: session.event_id || null,
             expiresAt: session.expires_at,
           },
         });
@@ -471,13 +448,19 @@ export function GameProvider({ children }) {
       dispatch({ type: "SESSION_START_ERROR", payload: message });
       throw err;
     }
-  }, [state.authToken, state.language, getValidGameToken, fetchActiveEvent]);
+  }, [state.authToken, state.language, getValidGameToken]);
 
   // Session complete + score submission
   const completeP2RSession = useCallback(async (finalScore, telemetryData) => {
     if (!state.session || !state.authToken) {
       throw new Error("No active session or player token");
     }
+
+    if (state.session.status === "completed") {
+      return null;
+    }
+
+    validatePixelTypeTelemetry(telemetryData);
 
     try {
       let gameToken = await getValidGameToken();
@@ -500,7 +483,7 @@ export function GameProvider({ children }) {
           "pixeltype",
           state.session.id,
           completePayload,
-          { token: state.authToken, gameToken }
+          { playerToken: state.authToken, gameToken }
         );
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -510,7 +493,7 @@ export function GameProvider({ children }) {
             "pixeltype",
             state.session.id,
             completePayload,
-            { token: state.authToken, gameToken }
+            { playerToken: state.authToken, gameToken }
           );
         } else {
           throw err;
@@ -546,10 +529,9 @@ export function GameProvider({ children }) {
         {
           action_code: actionCode,
           session_id: state.session.id,
-          event_id: state.session.eventId,
           idempotency_key: idempotencyKey,
         },
-        { token: state.authToken, gameToken }
+        { playerToken: state.authToken, gameToken }
       );
 
       if (response.success && response.data) {
@@ -568,26 +550,13 @@ export function GameProvider({ children }) {
     }
   }, [state.authToken, state.session, getValidGameToken]);
 
-  // Leaderboard
+  // Leaderboard (public endpoint; server resolves active global event automatically)
   const fetchLeaderboard = useCallback(async () => {
     dispatch({ type: "LEADERBOARD_LOADING" });
 
     try {
-      let gameToken = null;
-      if (state.authToken) {
-        try {
-          gameToken = await getValidGameToken();
-        } catch (e) {
-          console.warn("[P2R] Could not get game token for leaderboard:", e);
-        }
-      }
-
-      const event = state.authToken ? await fetchActiveEvent() : null;
-      const params = event?.id ? { event_id: event.id } : undefined;
-
-      const response = await getLeaderboard("pixeltype", params, {
+      const response = await getLeaderboard("pixeltype", undefined, {
         token: state.authToken || undefined,
-        gameToken: gameToken || undefined,
       });
 
       if (response.success && response.data) {
@@ -601,7 +570,7 @@ export function GameProvider({ children }) {
       dispatch({ type: "LEADERBOARD_ERROR", payload: message });
       throw err;
     }
-  }, [state.authToken, getValidGameToken, fetchActiveEvent]);
+  }, [state.authToken]);
 
   // Wallet
   const fetchWallet = useCallback(async () => {
@@ -633,9 +602,10 @@ export function GameProvider({ children }) {
       // Validate token with /me
       getMe({ token })
         .then((res) => {
-          if (res.success && res.data) {
-            localStorage.setItem("p2r_user", JSON.stringify(res.data.user));
-            dispatch({ type: "SET_AUTH", payload: { token, user: res.data.user } });
+          const userData = res.data?.user || res.data;
+          if (res.success && userData && userData.id) {
+            localStorage.setItem("p2r_user", JSON.stringify(userData));
+            dispatch({ type: "SET_AUTH", payload: { token, user: userData } });
             fetchWallet();
           } else {
             localStorage.removeItem("p2r_auth_token");
@@ -720,7 +690,6 @@ export function GameProvider({ children }) {
 
     // P2R Integration
     getValidGameToken,
-    fetchActiveEvent,
     startP2RSession,
     completeP2RSession,
     spendCoins,

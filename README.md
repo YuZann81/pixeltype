@@ -113,8 +113,8 @@ The game is accessible locally at `http://localhost:3000`. The Vite development 
 | `P2R_API_BASE_URL` | `https://pameran.devsaka.id/api/v1` | Server-side canonical base URL for P2R Core API. |
 | `P2R_GAME_SLUG` | `pixeltype` | Registered game slug in P2R platform. |
 | `P2R_PLATFORM` | `web` | Game runtime platform (`web`, `desktop`, `mobile`). |
-| `P2R_CLIENT_ID` | `p2r_game_kl2v23gdcwser5ra` | Provisioned Game Runtime Client ID. |
-| `P2R_CLIENT_SECRET` | `sec_...` | Provisioned Game Runtime Client Secret (**SERVER-SIDE ONLY**). |
+| `P2R_CLIENT_ID` | `<your_p2r_client_id>` | Provisioned Game Runtime Client ID. |
+| `P2R_CLIENT_SECRET` | `<your_p2r_client_secret>` | Provisioned Game Runtime Client Secret (**SERVER-SIDE ONLY**). |
 | `GEMINI_API_KEY` | `your_gemini_api_key` | Optional Google Gemini API key for dynamic AI word generation. |
 | `APP_URL` | `http://localhost:3000` | Optional applet host URL reference. |
 

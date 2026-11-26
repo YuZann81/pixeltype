@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig, type Plugin } from 'vite';
 import dotenv from 'dotenv';
-import { getOrFetchGameToken } from './src/server/gameTokenService.ts';
+import { handleGameTokenRequest } from './src/server/gameTokenService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,31 +26,16 @@ function p2rGameTokenDevPlugin(): Plugin {
         const pathname = rawUrl.split('?')[0];
 
         if (req.method === 'POST' && (pathname === '/api/bff/game-token' || pathname === '/api/game-token')) {
-          try {
-            const queryParams = new URL(rawUrl, 'http://localhost').searchParams;
-            const forceRefresh = queryParams.get('force') === 'true';
-            const tokenData = await getOrFetchGameToken({ forceRefresh });
+          const queryParams = new URL(rawUrl, 'http://localhost').searchParams;
+          const forceRefresh = queryParams.get('force') === 'true';
+          const result = await handleGameTokenRequest({
+            authHeader: typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
+            forceRefresh,
+          });
 
-            res.setHeader('Content-Type', 'application/json');
-            res.statusCode = 200;
-            res.end(
-              JSON.stringify({
-                success: true,
-                message: 'Game access token issued successfully.',
-                data: tokenData,
-              })
-            );
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to acquire game access token';
-            res.setHeader('Content-Type', 'application/json');
-            res.statusCode = 500;
-            res.end(
-              JSON.stringify({
-                success: false,
-                message,
-              })
-            );
-          }
+          res.setHeader('Content-Type', 'application/json');
+          res.statusCode = result.status;
+          res.end(JSON.stringify(result.body));
           return;
         }
         next();

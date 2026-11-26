@@ -3,14 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState, useMemo } from "react";
 
 /**
  * TypingArea component
- * Highlight per huruf:
- * - benar: #4ADE80 (hijau)
- * - salah: #F87171 (merah)
- * - belum diketik: #9CA3AF (abu)
+ * Groups characters by word inside non-breaking word wrappers (`whitespace-nowrap`)
+ * so words never split across lines while preserving character-level coloring and caret.
  */
 export default function TypingArea({
   targetText = "",
@@ -19,7 +17,7 @@ export default function TypingArea({
   disabled = false,
   inputRef,
 }) {
-  const containerRef = useRef(null);
+  const [isFocused, setIsFocused] = useState(false);
   const fallbackInputRef = useRef(null);
   const activeInputRef = inputRef || fallbackInputRef;
 
@@ -36,13 +34,34 @@ export default function TypingArea({
     }
   };
 
-  const characters = targetText.split("");
+  // Group characters into word tokens (each word keeps its trailing space attached)
+  const wordTokens = useMemo(() => {
+    const tokens = [];
+    let currentChars = [];
+    let tokenStart = 0;
+
+    for (let i = 0; i < targetText.length; i++) {
+      const char = targetText[i];
+      currentChars.push({ char, index: i });
+      if (char === " ") {
+        tokens.push({ startIndex: tokenStart, chars: currentChars });
+        currentChars = [];
+        tokenStart = i + 1;
+      }
+    }
+
+    if (currentChars.length > 0) {
+      tokens.push({ startIndex: tokenStart, chars: currentChars });
+    }
+
+    return tokens;
+  }, [targetText]);
 
   return (
     <div
       id="typing-area-container"
       onClick={handleContainerClick}
-      className="relative w-full max-w-2xl mx-auto my-4 p-6 sm:p-8 bg-[#1A1B2E]/60 border border-[#3A2B5C] rounded-xl cursor-text transition-all duration-150"
+      className="relative w-full max-w-2xl mx-auto my-4 px-2 py-4 sm:px-4 sm:py-6 bg-transparent border-0 rounded-none shadow-none cursor-text transition-all duration-150"
     >
       {/* Hidden real input for keyboard focus and mobile compatibility */}
       <input
@@ -51,6 +70,9 @@ export default function TypingArea({
         type="text"
         value={userInput}
         onChange={(e) => onInputChange && onInputChange(e.target.value)}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        onPaste={(e) => e.preventDefault()}
         disabled={disabled}
         autoFocus
         autoComplete="off"
@@ -61,48 +83,72 @@ export default function TypingArea({
         aria-label="Ketik teks di sini"
       />
 
-      {/* Rendered Text with Letter-by-Letter Highlighting */}
+      {/* Rendered Text: Whole-word non-breaking wrappers directly over galaxy background */}
       <div
         id="typing-text-display"
-        className="font-mono text-lg sm:text-xl leading-relaxed tracking-normal select-none break-words min-h-[5.5rem] flex flex-wrap items-baseline gap-y-1"
+        className={`font-mono-typing text-xl sm:text-2xl leading-relaxed tracking-normal select-none min-h-[6.5rem] flex flex-wrap content-start gap-y-1.5 transition-all duration-150 ${
+          !isFocused && !disabled ? "opacity-45 blur-[1.5px]" : "opacity-100"
+        }`}
       >
-        {characters.map((char, index) => {
-          let charColor = "text-[#9CA3AF]/70"; // belum diketik
-          let isCurrentCursor = index === userInput.length;
-          let isSpace = char === " ";
+        {wordTokens.map((token) => (
+          <span
+            key={token.startIndex}
+            className="inline-flex whitespace-nowrap max-w-full"
+          >
+            {token.chars.map(({ char, index }) => {
+              let charColor = "text-[#A6A9BA]"; // untyped
+              const isCurrentCursor = index === userInput.length;
+              const isSpace = char === " ";
 
-          if (index < userInput.length) {
-            const userChar = userInput[index];
-            const isCorrect = userChar === char;
-            if (isCorrect) {
-              charColor = "text-[#4ADE80] font-medium";
-            } else {
-              charColor = "text-[#F87171] underline decoration-[#F87171] font-medium bg-[#F87171]/10 rounded-xs";
-            }
-          }
+              if (index < userInput.length) {
+                const isCorrect = userInput[index] === char;
+                if (isCorrect) {
+                  charColor = "text-[#86CFA4] font-medium";
+                } else {
+                  charColor =
+                    "text-[#D98A91] underline decoration-[#D98A91] font-medium";
+                }
+              }
 
-          return (
-            <span
-              key={index}
-              className={`relative inline-block ${charColor} transition-colors duration-75`}
-            >
-              {/* Blinking cursor at the next expected letter */}
-              {isCurrentCursor && !disabled && (
+              return (
                 <span
-                  aria-hidden="true"
-                  className="absolute -left-[1px] top-0 bottom-0 w-[2px] bg-[#7C6BF5] animate-pulse"
-                />
-              )}
-              {isSpace ? "\u00A0" : char}
-            </span>
-          );
-        })}
+                  key={index}
+                  className={`relative inline-block ${charColor} transition-colors duration-75`}
+                >
+                  {isCurrentCursor && !disabled && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -left-[1px] top-0.5 bottom-0.5 w-[2px] rounded-full bg-[#C2B7FF] animate-pulse"
+                    />
+                  )}
+                  {isSpace ? "\u00A0" : char}
+                </span>
+              );
+            })}
+          </span>
+        ))}
       </div>
 
-      {/* Subtitle helper if unfocused */}
-      <div className="mt-4 pt-3 border-t border-[#3A2B5C]/40 flex items-center justify-between text-xs text-[#9CA3AF]">
-        <span>Ketik sesuai urutan karakter</span>
-        <span className="text-[11px] text-[#7C6BF5]/80">
+      {/* Clear Focus/Blur Overlay */}
+      {!isFocused && !disabled && (
+        <div
+          id="typing-focus-overlay"
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        >
+          <span className="px-4 py-2 rounded-lg bg-[#0B0B1F]/90 border border-[#3A2B5C] font-mono-typing text-xs text-[#FBBF24] tracking-wide">
+            Klik area ini untuk melanjutkan mengetik
+          </span>
+        </div>
+      )}
+
+      {/* Subtle character progress footer */}
+      <div className="mt-4 pt-2 flex items-center justify-between text-xs text-[#A6A9BA]/80">
+        <span className={!isFocused && !disabled ? "text-[#FBBF24] font-medium" : ""}>
+          {!isFocused && !disabled
+            ? "Klik area ini untuk melanjutkan mengetik"
+            : "Ketik sesuai urutan karakter"}
+        </span>
+        <span className="text-[11px] font-mono-typing text-[#C2B7FF]/90">
           {userInput.length} / {targetText.length} Karakter
         </span>
       </div>
